@@ -1,0 +1,35 @@
+---
+title: "Amazon EKS AMI: the official EKS node image source"
+description: "Build custom EKS-optimized AMIs using the same Packer configuration AWS uses for official AL2023 worker nodes, with nodeadm for node initialization."
+---
+
+Amazon EKS AMI is the open-source Packer configuration that AWS uses internally to produce the official EKS-optimized AMIs. You can use it to build custom Kubernetes worker nodes on Amazon Linux 2023 — with your own configuration, Kubernetes version, hardware acceleration requirements, or FIPS compliance settings — and initialize them declaratively at launch using `nodeadm`.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Build your first EKS-optimized AMI in minutes with Packer and the Makefile
+  </Card>
+  <Card title="Building AMIs" icon="box" href="/building/overview">
+    Explore Packer template variables, Kubernetes binary options, and build customization
+  </Card>
+  <Card title="nodeadm" icon="gear" href="/nodeadm/overview">
+    Configure EKS nodes declaratively using the NodeConfig YAML API
+  </Card>
+  <Card title="API reference" icon="code" href="/reference/api">
+    Full reference for the NodeConfig API types and all configuration fields
+  </Card>
+</CardGroup>
+
+## Key features
+
+- **Amazon Linux 2023** — AL2023 is the current supported distribution for all Kubernetes versions 1.33 and higher. AL2 support ended November 26, 2025.
+- **nodeadm** — Declarative node initialization via a Kubernetes-style `NodeConfig` API passed as EC2 user data.
+- **Accelerated instances** — Built-in support for NVIDIA GPU and AWS Neuron driver installation for ML and inference workloads.
+- **EFA networking** — Elastic Fabric Adapter driver support for high-throughput, low-latency networking.
+- **FIPS builds** — Optional FIPS-mode builds with OpenSSL and kernel parameter configuration.
+- **Kubernetes version selection** — Build for any supported Kubernetes minor version by passing `k8s=<version>` to `make`.
+- **Same configuration as AWS** — This repository is the exact configuration Amazon EKS uses to create and publish official EKS-optimized AMIs.
+
+<Note>
+  Amazon EKS stopped publishing EKS-optimized Amazon Linux 2 (AL2) AMIs on November 26, 2025. AL2023 and Bottlerocket-based AMIs are available for all supported Kubernetes versions including 1.33 and higher.
+</Note>

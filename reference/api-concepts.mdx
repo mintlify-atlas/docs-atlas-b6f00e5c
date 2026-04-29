@@ -1,0 +1,80 @@
+---
+title: "nodeadm API versioning, stability, and feature gates"
+description: "How the node.eks.aws API group is versioned, what stability guarantees each level provides, and how to enable experimental feature gates."
+---
+
+The `nodeadm` configuration API (`node.eks.aws`) follows the same versioning model as the Kubernetes API. Each API version carries a stability level that communicates its support guarantees and how breaking changes are handled over time.
+
+## API versioning
+
+There are three stability levels: alpha, beta, and stable.
+
+<AccordionGroup>
+  <Accordion title="Alpha (e.g. v1alpha1, v1alpha2)">
+    Alpha APIs are experimental and may change at any time.
+
+    - Support may be removed in any release without notice.
+    - Subsequent alpha versions may include incompatible changes.
+    - Migration instructions between alpha versions are not guaranteed.
+
+    <Warning>
+      Do not rely on alpha APIs for production workloads. The current version `node.eks.aws/v1alpha1` is an alpha API.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="Beta (e.g. v3beta4)">
+    Beta APIs are more stable and carry formal deprecation commitments.
+
+    - Support is maintained for at least one release after deprecation is announced.
+    - Subsequent beta or stable versions may include incompatible changes.
+    - Migration instructions will be provided when breaking changes are introduced.
+  </Accordion>
+
+  <Accordion title="Stable (e.g. v5)">
+    Stable APIs carry the strongest support guarantees.
+
+    - Support aligns with the support lifecycle of a major version of Amazon Linux.
+    - Breaking changes are avoided within a stable API version.
+  </Accordion>
+</AccordionGroup>
+
+## Feature gates
+
+Feature gates let you opt into experimental behaviors that are not yet enabled by default. You set them in the `spec.featureGates` field of a `NodeConfig` object.
+
+| Name | Default | Since | Until | Description |
+|---|---|---|---|---|
+| `InstanceIdNodeName` | `false` | — | — | Use the EC2 instance ID as the Kubernetes node name instead of the hostname. |
+| `FastImagePull` | `false` | — | — | Enable parallel container image pull. Uses more CPU, memory, and EBS I/O during pull but may reduce startup time. Ignored on instances below a minimum resource threshold. |
+
+<Note>
+  `FastImagePull` is experimental. Enable it only after evaluating the resource impact on your instance type.
+</Note>
+
+### Enabling feature gates
+
+Add a `featureGates` map to your `NodeConfig` spec. Set a feature name to `true` to enable it, or `false` to explicitly disable it.
+
+```yaml
+apiVersion: node.eks.aws/v1alpha1
+kind: NodeConfig
+spec:
+  cluster:
+    name: my-cluster
+    apiServerEndpoint: https://ABCDEF1234567890.gr7.us-west-2.eks.amazonaws.com
+    certificateAuthority: <base64-encoded-ca>
+    cidr: 172.20.0.0/16
+  featureGates:
+    InstanceIdNodeName: true
+    FastImagePull: true
+```
+
+## Behavioral boundaries
+
+The table below documents behaviors that `nodeadm` introduced at specific Kubernetes versions. These are not gated by feature flags — they apply automatically once the minimum version is met.
+
+| Behavior | Since | Until |
+|---|---|---|
+| Apply the `nvidia.com/gpu.present=true` node label on startup if NVIDIA devices are detected on the instance | 1.35 | — |
+| Enable CDI in the default containerd configuration | 1.32 | — |
+| Write user-provided kubelet config as a kubelet drop-in configuration file | 1.29 | — |

@@ -1,0 +1,129 @@
+---
+title: "Amazon Linux 2023 EKS AMI: full template variable guide"
+description: "Reference for AL2023 Packer template variables including instance type, volume size, SSH interface, pause container image, and SSM agent version."
+---
+
+The Amazon Linux 2023 template is the actively maintained EKS-optimized AMI distribution. Pass `os_distro=al2023` to any `make` target to select this template.
+
+<Warning>
+Amazon EKS stopped publishing EKS-optimized Amazon Linux 2 (AL2) AMIs on November 26, 2025. Use AL2023 for all Kubernetes versions including 1.33 and higher.
+</Warning>
+
+## Template variables
+
+The following variables are accepted by the AL2023 Packer template. Set defaults in a variable file or override them on the `make` command line. See [AMI template variables and build options](/building/overview) for how variable precedence works.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ami_name` | _(set by Makefile)_ | Name of the resulting AMI |
+| `ami_description` | `EKS-optimized Kubernetes node based on Amazon Linux 2023` | AMI description |
+| `ami_component_description` | `(k8s: <version>, containerd: <version>)` | Component version string appended to `ami_description` |
+| `ami_regions` | _(empty)_ | Comma-separated list of additional regions to copy the AMI to |
+| `ami_users` | _(empty)_ | AWS account IDs to share the AMI with |
+| `arch` | _(set by Makefile)_ | Target architecture: `x86_64` or `arm64` |
+| `associate_public_ip_address` | _(empty)_ | Whether to assign a public IP to the builder instance |
+| `aws_region` | `us-west-2` | AWS region for the build |
+| `binary_bucket_name` | `amazon-eks` | S3 bucket for Kubernetes binaries |
+| `binary_bucket_region` | `us-west-2` | Region of the binary S3 bucket |
+| `containerd_version` | `2.*` | containerd version to install |
+| `install_containerd_from_s3` | `false` | Install containerd from S3 instead of the OS repo |
+| `enable_accelerator` | _(empty)_ | Accelerator vendor: `nvidia` or `neuron` |
+| `enable_efa` | `false` | Install EFA (Elastic Fabric Adapter) software |
+| `enable_fips` | `false` | Install OpenSSL and enable FIPS kernel parameters |
+| `encrypted` | `false` | Encrypt the AMI root volume |
+| `iam_instance_profile` | _(empty)_ | IAM instance profile for the builder EC2 instance |
+| `instance_type` | _(set by Makefile)_ | EC2 instance type for the builder (`m5.large` or `m6g.large`) |
+| `kms_key_id` | _(empty)_ | KMS key ID for volume encryption |
+| `kubernetes_version` | _(set by Makefile)_ | Full Kubernetes version (e.g., `1.31.2`) |
+| `kubernetes_build_date` | _(set by Makefile)_ | Build date for the Kubernetes binaries |
+| `launch_block_device_mappings_volume_size` | `20` | Builder instance root volume size in GiB |
+| `nodeadm_build_image` | `public.ecr.aws/eks-distro-build-tooling/golang:1.25` | Container image used to build `nodeadm` |
+| `nvidia_driver_major_version` | `580` | NVIDIA driver major version (only with `enable_accelerator=nvidia`) |
+| `nvidia_repository_url` | _(null)_ | YUM/DNF repository override for NVIDIA driver packages |
+| `nvidia_grid_runfile_bucket_name` | `ec2-linux-nvidia-drivers` | S3 bucket for the NVIDIA GRID runfile |
+| `pause_container_image` | `public.ecr.aws/eks-distro/kubernetes/pause:3.10` | Pause container image reference baked into the AMI |
+| `remote_folder` | `/tmp` | Directory for provisioner scripts on the builder instance |
+| `runc_version` | `*` | runc version to install |
+| `security_group_id` | _(empty)_ | Security group for the builder instance |
+| `source_ami_filter_name` | `al2023-ami-minimal-2023.*-kernel-6.18-*` | Filter to select the source AMI |
+| `source_ami_id` | _(empty)_ | Explicit source AMI ID (overrides filter) |
+| `source_ami_owners` | `137112412989` | AWS account that owns the source AMI |
+| `ssh_interface` | _(empty)_ | SSH connection method; use `session_manager` for private subnets |
+| `ssh_username` | `ec2-user` | SSH user for provisioning |
+| `ssm_agent_version` | _(empty)_ | SSM agent version to install (e.g., `latest`); if empty, installs from AL2023 core repos |
+| `subnet_id` | _(empty)_ | VPC subnet for the builder instance |
+| `temporary_key_pair_type` | `ed25519` | Key pair type for the temporary SSH key |
+| `temporary_security_group_source_cidrs` | _(empty)_ | CIDR ranges allowed to connect to the builder |
+| `user_data_file` | _(null)_ | Path to a user data file for the builder instance |
+| `volume_type` | `gp3` | EBS volume type |
+| `working_dir` | `/tmp/worker` | Working directory for ephemeral resources on the builder |
+| `custom_endpoint_ec2` | _(empty)_ | Custom EC2 endpoint URL (for private or GovCloud regions) |
+
+## Instance type and volume size
+
+The Makefile sets a default instance type based on the target architecture. You can override it for builds that need more resources, such as accelerated builds:
+
+```bash
+make build os_distro=al2023 k8s=1.31 instance_type=g4dn.xlarge
+```
+
+For accelerated AMIs, set `launch_block_device_mappings_volume_size` to at least `20` GiB (the default). If you install additional drivers or toolkits, consider increasing this:
+
+```bash
+make build os_distro=al2023 k8s=1.31 \
+  enable_accelerator=nvidia \
+  launch_block_device_mappings_volume_size=30
+```
+
+## SSH interface
+
+By default, Packer connects to the builder instance over SSH using a temporary key pair and security group. In environments without public internet access, use AWS Systems Manager Session Manager instead:
+
+```bash
+make build os_distro=al2023 k8s=1.31 \
+  ssh_interface=session_manager \
+  subnet_id=subnet-0abc123
+```
+
+<Note>
+When using `ssh_interface=session_manager`, the source AMI must not be the minimal variant, since the minimal AMI does not include the SSM agent.
+</Note>
+
+## Pause container image
+
+The pause container image is baked into the AMI at build time. The `nodeadm` utility reads the `pause_container_image` variable to populate the `sandbox_image` field in the containerd `config.toml`. The image is not pulled at runtime.
+
+The default image points to an EKS-owned ECR registry:
+
+```
+public.ecr.aws/eks-distro/kubernetes/pause:3.10
+```
+
+To use a different image, such as the upstream Kubernetes pause image:
+
+```bash
+make build os_distro=al2023 k8s=1.31 \
+  pause_container_image=registry.k8s.io/pause:3.10
+```
+
+To use an ECR image in a different region, find the region-specific registry at the [EKS add-ons images reference](https://docs.aws.amazon.com/eks/latest/userguide/add-ons-images.html).
+
+To use a FIPS-compliant ECR endpoint, change `ecr` to `ecr-fips` in the registry URI:
+
+```diff
+-<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com
++<ACCOUNT_ID>.dkr.ecr-fips.<REGION>.amazonaws.com
+```
+
+## SSM agent version
+
+The `ssm_agent_version` variable controls which version of the AWS Systems Manager agent is installed:
+
+- **Empty (default)** — installs the latest version available in the Amazon Linux 2023 core repositories.
+- **`latest`** — installs the latest version from the SSM agent S3 bucket managed by the SSM project.
+- **Specific version** — installs an exact release from the SSM project S3 bucket.
+
+```bash
+# Install a specific SSM agent version
+make build os_distro=al2023 k8s=1.31 ssm_agent_version=3.2.1630.0
+```

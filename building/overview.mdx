@@ -1,0 +1,164 @@
+---
+title: "EKS AMI build options: Packer variables and targets"
+description: "Configure Packer template variables and Make targets to customize EKS-optimized AMI builds for any Kubernetes version, architecture, or binary source."
+---
+
+Each OS distribution has a Packer template with variables whose defaults are determined by the specified Kubernetes version. You can override any variable by providing a variable file, by passing key-value pairs directly to `make`, or by combining both methods.
+
+## How variables work
+
+Variable resolution follows this order of precedence, with later sources winning:
+
+1. Default variable file (`templates/<os_distro>/variables-default.json`)
+2. Kubernetes-version-specific variable file (`templates/<os_distro>/variables-<k8s-minor>.json`), if it exists
+3. User-supplied variable file (via `PACKER_VARIABLE_FILE`)
+4. Key-value pairs passed on the `make` command line
+
+Your variable file only needs to include the variables you want to override. It is merged with the default variable file automatically.
+
+<Note>
+Some variables, such as `arch` and `kubernetes_version`, have no static default and are resolved by the Makefile itself. These variables do not appear in the default variable file. Override them directly on the `make` command line when needed.
+</Note>
+
+### Using a variable file
+
+Create a JSON file with the variables you want to override, then pass it to `make`:
+
+```bash
+PACKER_VARIABLE_FILE=my-vars.json make build os_distro=al2023 k8s=1.31
+```
+
+Example variable file:
+
+```json
+{
+  "ami_regions": "us-east-1,eu-west-1",
+  "instance_type": "m5.xlarge",
+  "launch_block_device_mappings_volume_size": "30"
+}
+```
+
+### Passing variables on the command line
+
+You can pass any template variable as a `key=value` argument to `make`. These override both the default variable file and any user-supplied variable file:
+
+```bash
+make build os_distro=al2023 k8s=1.31 instance_type=m5.xlarge
+```
+
+## Make targets
+
+| Target | Description |
+|--------|-------------|
+| `build` | Build an AMI using the latest available Kubernetes binaries (calls `hack/latest-binaries.sh` automatically) |
+| `k8s` | Build an AMI with a specific Kubernetes version; requires `kubernetes_version` and `kubernetes_build_date` |
+| `validate` | Validate the Packer template and variable files without building |
+| `fmt` | Format shell scripts in the repository |
+| `lint` | Run all lints (docs and code) |
+
+Both `build` and `k8s` require `os_distro` and `k8s` arguments:
+
+```bash
+make build os_distro=al2023 k8s=1.31
+```
+
+## Architecture support
+
+The templates support both `x86_64` and `arm64`. The default is `x86_64`. To build for arm64:
+
+```bash
+make build os_distro=al2023 k8s=1.31 arch=arm64
+```
+
+The Makefile selects an appropriate default `instance_type` per architecture:
+
+- `x86_64` — defaults to `m5.large`
+- `arm64` — defaults to `m6g.large`
+
+## Kubernetes binaries
+
+When building an AMI, Packer downloads Kubernetes binaries including `kubelet`, `aws-iam-authenticator`, and `ecr-credential-provider` from S3. You can use the latest available binaries, pin to a specific version, or supply your own.
+
+### Latest binaries (recommended)
+
+The `build` target calls `hack/latest-binaries.sh` automatically to resolve the most recent binaries for the specified minor version. To see what will be used before building:
+
+```bash
+hack/latest-binaries.sh <kubernetes-minor-version> <aws-region>
+```
+
+Example output:
+
+```bash
+hack/latest-binaries.sh 1.31 us-west-2
+
+kubernetes_version=1.31.2 kubernetes_build_date=2024-09-26
+```
+
+Use the returned values directly with `make k8s` to reproduce the same build later.
+
+### Specific version via S3
+
+Use the AWS CLI to browse available versions in the public `amazon-eks` S3 bucket:
+
+```bash
+# List available Kubernetes versions
+aws s3 ls s3://amazon-eks
+
+# List build dates for a version
+aws s3 ls s3://amazon-eks/1.31.2/
+
+# List platforms
+aws s3 ls s3://amazon-eks/1.31.2/2024-09-26/bin/
+
+# List architectures
+aws s3 ls s3://amazon-eks/1.31.2/2024-09-26/bin/linux/
+
+# List available binaries
+aws s3 ls s3://amazon-eks/1.31.2/2024-09-26/bin/linux/x86_64/
+```
+
+Then build with those exact coordinates:
+
+```bash
+make k8s \
+  os_distro=al2023 \
+  k8s=1.31 \
+  kubernetes_version=1.31.2 \
+  kubernetes_build_date=2024-09-26 \
+  arch=x86_64
+```
+
+### Custom S3 bucket
+
+By default, binaries are downloaded from the public `amazon-eks` bucket in `us-west-2`. To use your own binaries:
+
+<Steps>
+  <Step title="Copy binaries to your bucket">
+    Mirror all required binaries for the target `kubernetes_version`, `kubernetes_build_date`, and `arch` combination:
+
+    ```bash
+    aws s3 cp kubelet \
+      s3://$BUCKET/$KUBERNETES_VERSION/$KUBERNETES_BUILD_DATE/bin/linux/$ARCH/kubelet
+    ```
+
+    You must provide every binary present in the default `amazon-eks` bucket for that version and architecture combination. The binaries must be accessible using the credentials on the Packer builder EC2 instance.
+  </Step>
+  <Step title="Build with your bucket">
+    Pass `binary_bucket_name` and `binary_bucket_region` to `make`:
+
+    ```bash
+    make k8s \
+      os_distro=al2023 \
+      k8s=1.31 \
+      binary_bucket_name=my-custom-bucket \
+      binary_bucket_region=eu-west-1 \
+      kubernetes_version=1.31.2 \
+      kubernetes_build_date=2024-09-26
+    ```
+
+    <Note>
+    If you use a custom bucket, update the S3 resource ARN in your IAM policy to allow access to that bucket. See [IAM permissions](/building/iam-permissions).
+    </Note>
+  </Step>
+</Steps>

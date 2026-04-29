@@ -1,0 +1,230 @@
+---
+title: "NodeConfig API field reference — node.eks.aws/v1alpha1"
+description: "Complete field-level reference for all types in the NodeConfig API: cluster, kubelet, containerd, instance, storage, network, and feature gate options."
+---
+
+`NodeConfig` is the primary configuration object consumed by `nodeadm` when a node bootstraps into an EKS cluster. It belongs to the `node.eks.aws/v1alpha1` API group and follows the Kubernetes object model with `apiVersion`, `kind`, `metadata`, and `spec` fields.
+
+## Full example
+
+The following `NodeConfig` shows every optional section populated with representative values.
+
+```yaml
+apiVersion: node.eks.aws/v1alpha1
+kind: NodeConfig
+metadata:
+  name: my-node-config
+spec:
+  cluster:
+    name: my-cluster
+    apiServerEndpoint: https://ABCDEF1234567890.gr7.us-west-2.eks.amazonaws.com
+    certificateAuthority: <base64-encoded-ca>
+    cidr: 172.20.0.0/16
+    enableOutpost: false
+    id: ""
+  kubelet:
+    config:
+      maxPods: 110
+      evictionHard:
+        memory.available: "100Mi"
+    flags:
+      - "--node-labels=eks.amazonaws.com/nodegroup=my-ng"
+    maxPodsExpression: "((default_enis - 1) * (ips_per_eni - 1)) + 2"
+  containerd:
+    config: |
+      [plugins."io.containerd.grpc.v1.cri".containerd]
+        snapshotter = "overlayfs"
+    baseRuntimeSpec:
+      process:
+        rlimits:
+          - type: RLIMIT_NOFILE
+            soft: 65536
+            hard: 65536
+  instance:
+    localStorage:
+      strategy: RAID0
+      mountPath: /mnt/k8s-disks/
+      disabledMounts:
+        - PodLogs
+    environment:
+      default:
+        HTTP_PROXY: "http://proxy.example.com:3128"
+      kubelet:
+        KUBELET_EXTRA_ARGS: "--max-open-files=1000000"
+    network:
+      nameservers:
+        - 169.254.169.253
+      domains:
+        - cluster.local
+  featureGates:
+    InstanceIdNodeName: false
+    FastImagePull: false
+```
+
+---
+
+## Types
+
+### NodeConfig
+
+`NodeConfig` is the root object for `nodeadm` configuration.
+
+| Field | Type | Description |
+|---|---|---|
+| `apiVersion` | `string` | Must be `node.eks.aws/v1alpha1`. |
+| `kind` | `string` | Must be `NodeConfig`. |
+| `metadata` | `ObjectMeta` | Standard Kubernetes object metadata. |
+| `spec` | [`NodeConfigSpec`](#nodeconfigspec) | The node configuration specification. |
+
+---
+
+### NodeConfigSpec
+
+`NodeConfigSpec` contains all configurable sections of a node configuration.
+
+| Field | Type | Description |
+|---|---|---|
+| `cluster` | [`ClusterDetails`](#clusterdetails) | Coordinates of your EKS cluster. |
+| `kubelet` | [`KubeletOptions`](#kubeletoptions) | Additional parameters passed to `kubelet`. |
+| `containerd` | [`ContainerdOptions`](#containerdoptions) | Additional parameters passed to `containerd`. |
+| `instance` | [`InstanceOptions`](#instanceoptions) | OS and device configuration for the node. |
+| `featureGates` | `map[`[`Feature`](#feature)`, bool]` | Key-value pairs to enable or disable feature gates. |
+
+---
+
+### ClusterDetails
+
+`ClusterDetails` contains the coordinates of your EKS cluster. You can retrieve these values from the [DescribeCluster API](https://docs.aws.amazon.com/eks/latest/APIReference/API_DescribeCluster.html).
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | `string` | Name of your EKS cluster. |
+| `apiServerEndpoint` | `string` | URL of your EKS cluster's kube-apiserver. |
+| `certificateAuthority` | `[]byte` | Base64-encoded certificate authority chain for the cluster. |
+| `cidr` | `string` | Service CIDR block for the cluster. Used to infer the cluster DNS address. |
+| `enableOutpost` | `*bool` | When `true`, configures the node for running on an AWS Outpost. |
+| `id` | `string` | Cluster identifier. Only used when the node is running on an AWS Outpost. |
+
+---
+
+### KubeletOptions
+
+`KubeletOptions` passes additional configuration and flags to `kubelet`.
+
+| Field | Type | Description |
+|---|---|---|
+| `config` | `map[string]object` | A [`KubeletConfiguration`](https://kubernetes.io/docs/reference/config-api/kubelet-config.v1beta1/) that is merged with the defaults. |
+| `flags` | `[]string` | [Command-line `kubelet` arguments](https://kubernetes.io/docs/reference/command-line-tools-reference/kubelet/) appended to the defaults. |
+| `maxPodsExpression` | `string` | A CEL expression that computes the `maxPods` value for the kubelet. Any `MaxPods` value set in `config` takes precedence. When the expression is evaluated successfully, `kubeReserved` is always calculated from its result. |
+
+```yaml
+kubelet:
+  config:
+    evictionHard:
+      memory.available: "200Mi"
+  flags:
+    - "--node-labels=purpose=gpu"
+  maxPodsExpression: "((default_enis - 1) * (ips_per_eni - 1)) + 2"
+```
+
+---
+
+### ContainerdOptions
+
+`ContainerdOptions` passes additional configuration to `containerd`.
+
+| Field | Type | Description |
+|---|---|---|
+| `config` | `string` | An inline [`containerd` configuration TOML](https://github.com/containerd/containerd/blob/main/docs/man/containerd-config.toml.5.md) merged with the defaults. |
+| `baseRuntimeSpec` | `map[string]object` | An OCI runtime specification merged with the default spec. Containers will use this as their base. See the [OCI runtime spec](https://github.com/opencontainers/runtime-spec) for available fields. |
+
+---
+
+### InstanceOptions
+
+`InstanceOptions` configures the node's operating system and devices.
+
+| Field | Type | Description |
+|---|---|---|
+| `localStorage` | [`LocalStorageOptions`](#localstorageoptions) | Controls how EC2 instance store volumes are used. |
+| `environment` | [`EnvironmentOptions`](#environmentoptions) | Environment variables for the system and systemd services. |
+| `network` | [`NetworkOptions`](#networkoptions) | Network name resolution settings for the host OS. |
+
+---
+
+### LocalStorageOptions
+
+`LocalStorageOptions` controls how [EC2 instance store volumes](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/InstanceStorage.html) are configured when available.
+
+| Field | Type | Description |
+|---|---|---|
+| `strategy` | [`LocalStorageStrategy`](#localstoragestrategy) | How to handle local storage devices. |
+| `mountPath` | `string` | Path where the filesystem is mounted. Defaults to `/mnt/k8s-disks/`. |
+| `disabledMounts` | `[]`[`DisabledMount`](#disabledmount) | Directories to exclude from local storage mounting. All mounts are enabled by default. |
+
+---
+
+### LocalStorageStrategy
+
+`LocalStorageStrategy` is a string enum that specifies how local storage devices are handled.
+
+| Value | Description |
+|---|---|
+| `RAID0` | Create a single RAID0 volume from all available local disks. |
+| `RAID10` | Create a single RAID10 volume from available local disks. Requires a minimum of 4 disks. |
+| `Mount` | Mount each local disk individually rather than combining them. |
+
+---
+
+### DisabledMount
+
+`DisabledMount` is a string enum that identifies a directory to exclude from local storage mounting.
+
+| Value | Path | Description |
+|---|---|---|
+| `Containerd` | `/var/lib/containerd` | Exclude the containerd data directory from local storage. |
+| `PodLogs` | `/var/log/pods` | Exclude the pod log directory from local storage. |
+| `SOCI` | `/var/lib/soci-snapshotter-grpc` | Exclude the SOCI snapshotter directory from local storage. |
+
+---
+
+### NetworkOptions
+
+`NetworkOptions` configures DNS name resolution on the host OS via systemd-resolved.
+
+| Field | Type | Description |
+|---|---|---|
+| `nameservers` | `[]string` | DNS servers for name resolution. Accepts both IPv4 and IPv6 addresses. See [`resolved.conf DNS=`](https://www.freedesktop.org/software/systemd/man/latest/resolved.conf.html#DNS=). |
+| `domains` | `[]string` | Search domains for name resolution. See [`resolved.conf Domains=`](https://www.freedesktop.org/software/systemd/man/latest/resolved.conf.html#Domains=). |
+
+---
+
+### EnvironmentOptions
+
+`EnvironmentOptions` is a `map[string]map[string]string` that sets environment variables for system services.
+
+- The key `default` applies environment variables across all services on the instance.
+- Any other key is treated as a systemd service name, and variables under it apply only to that service.
+
+```yaml
+instance:
+  environment:
+    default:
+      HTTP_PROXY: "http://proxy.example.com:3128"
+      NO_PROXY: "169.254.169.254,10.0.0.0/8"
+    kubelet:
+      KUBELET_EXTRA_ARGS: "--max-open-files=1000000"
+```
+
+---
+
+### Feature
+
+`Feature` is a string enum that identifies a feature gate. Pass feature names as keys in `spec.featureGates`.
+
+| Value | Description |
+|---|---|
+| `InstanceIdNodeName` | Use the EC2 instance ID as the Kubernetes node name. Default: `false`. |
+| `FastImagePull` | Enable parallel container image pull. Uses more CPU, memory, and EBS I/O, but may reduce node startup time. Ignored on instances below a minimum resource threshold. Default: `false`. |
+
+For more details on feature gates and behavioral boundaries, see [nodeadm API versioning and feature gates](/reference/api-concepts).

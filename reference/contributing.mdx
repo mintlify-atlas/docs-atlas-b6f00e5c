@@ -1,0 +1,137 @@
+---
+title: "Contributing to the amazon-eks-ami open-source repo"
+description: "Report bugs, submit pull requests, validate builds, and follow the code of conduct when contributing to the amazon-eks-ami open-source project."
+---
+
+Contributions of all kinds are welcome — bug reports, new features, documentation improvements, and code corrections. Before submitting, read this page to make sure your contribution meets the project's requirements and flows through the review process smoothly.
+
+## Reporting bugs and requesting features
+
+Use the [GitHub issue tracker](https://github.com/awslabs/amazon-eks-ami/issues) to file bugs or suggest features. Before opening a new issue, check the [open issues](https://github.com/awslabs/amazon-eks-ami/issues) and [recently closed issues](https://github.com/awslabs/amazon-eks-ami/issues?q=is%3Aissue+is%3Aclosed) to avoid duplicates.
+
+A useful bug report includes:
+
+- A reproducible test case or step-by-step instructions
+- The version of the code being used
+- Any local modifications relevant to the bug
+- Anything unusual about your environment or deployment
+
+## Submitting pull requests
+
+<Steps>
+  <Step title="Work from the latest main branch">
+    Make sure you are working against the latest source on the `main` branch before starting.
+  </Step>
+  <Step title="Check for existing PRs">
+    Review open and recently merged pull requests to confirm your change hasn't already been addressed.
+  </Step>
+  <Step title="Open an issue for significant work">
+    For anything non-trivial, open an issue first to discuss the approach. This avoids wasted effort if the direction needs to change.
+  </Step>
+  <Step title="Fork and implement the change">
+    Fork the repository and focus your change on a single concern. Avoid mixing reformatting or unrelated fixes into the same PR, as that makes review harder.
+  </Step>
+  <Step title="Format and lint your code">
+    Run the formatter and linter before committing:
+
+    ```bash
+    make fmt
+    make lint
+    make lint-docs
+    ```
+  </Step>
+  <Step title="Lint and validate">
+    Confirm the linter and docs checks pass before opening a PR:
+
+    ```bash
+    make lint
+    make lint-docs
+    ```
+  </Step>
+  <Step title="Commit with a clear message and open the PR">
+    Commit to your fork with a descriptive commit message, then open a pull request. Answer any template questions and respond to CI failures promptly.
+  </Step>
+</Steps>
+
+## Testing changes
+
+EKS runs a full validation suite before publishing official AMIs. For PRs, the following manual tests are expected before merge.
+
+<AccordionGroup>
+  <Accordion title="Test 1: Validate the template">
+    Check that the Packer template is valid:
+
+    ```bash
+    make validate os_distro=al2023 k8s=1.33
+    ```
+  </Accordion>
+
+  <Accordion title="Test 2: Build the AMI">
+    Verify that the AMI still builds with your changes. If your change targets a specific Kubernetes version, build only those AMIs. Otherwise, use the latest available version.
+
+    ```bash
+    # Configure AWS credentials first
+    make k8s=1.33 os_distro=al2023
+    ```
+  </Accordion>
+
+  <Accordion title="Test 3: Confirm node joins the cluster">
+    Launch a node using your built AMI ID and verify it successfully joins an EKS cluster. Pass your cluster's configuration as EC2 user data in MIME multi-part format so `nodeadm` can initialize the node at boot:
+
+    ```
+    MIME-Version: 1.0
+    Content-Type: multipart/mixed; boundary="BOUNDARY"
+
+    --BOUNDARY
+    Content-Type: application/node.eks.aws
+
+    ---
+    apiVersion: node.eks.aws/v1alpha1
+    kind: NodeConfig
+    spec:
+      cluster:
+        name: my-cluster
+        apiServerEndpoint: https://example.com
+        certificateAuthority: Y2VydGlmaWNhdGVBdXRob3JpdHk=
+        cidr: 10.100.0.0/16
+
+    --BOUNDARY--
+    ```
+
+    After the node starts, verify it appears in your cluster:
+
+    ```bash
+    kubectl get nodes
+    ```
+  </Accordion>
+
+  <Accordion title="Test 4: Kubernetes conformance (optional)">
+    Use [sonobuoy](https://sonobuoy.io/) to run conformance tests against the cluster you created. This step can take several hours.
+
+    ```bash
+    sonobuoy run --wait
+    ```
+  </Accordion>
+
+  <Accordion title="Clean up">
+    Delete the test cluster when you are done:
+
+    ```bash
+    eksctl delete cluster -f cluster.yaml
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Code of conduct
+
+This project has adopted the [Amazon Open Source Code of Conduct](https://aws.github.io/code-of-conduct). For questions, see the [Code of Conduct FAQ](https://aws.github.io/code-of-conduct-faq) or email opensource-codeofconduct@amazon.com.
+
+## Security issues
+
+<Warning>
+  Do not file security vulnerabilities as public GitHub issues. Report potential security issues to AWS Security through the [vulnerability reporting page](http://aws.amazon.com/security/vulnerability-reporting/).
+</Warning>
+
+## Licensing
+
+See the [LICENSE](https://github.com/awslabs/amazon-eks-ami/blob/main/LICENSE) file for the project license. For larger contributions, you may be asked to sign a [Contributor License Agreement (CLA)](https://en.wikipedia.org/wiki/Contributor_License_Agreement).

@@ -1,0 +1,177 @@
+---
+title: "EKS log collector: gather and export node diagnostics"
+description: "Run the EKS log collector script on Linux worker nodes to bundle OS and Kubernetes component logs for troubleshooting or AWS support cases."
+---
+
+The EKS log collector script (`eks-log-collector.sh`) gathers system information, configuration files, and logs from an EKS worker node into a single compressed archive. You can provide that archive to AWS Support or use it yourself when diagnosing node-level issues such as kubelet failures, networking problems, or container runtime errors.
+
+<Warning>
+  The log bundle may contain sensitive information. Review the bundle contents before sharing it with any other party. In particular, `/system/ps.txt` includes process command-line arguments, `/var/log/cloud-init-output.log` includes EC2 user data output, and `/cni/cni-configuration-variables-containerd.json` includes container environment variables.
+</Warning>
+
+## Run the log collector
+
+The script must be run as `root`. On EKS-optimized AMIs, it is pre-installed at `/etc/eks/log-collector-script/eks-log-collector.sh`.
+
+<Steps>
+  <Step title="Connect to the node">
+    SSH into the worker node or use AWS Systems Manager Session Manager to open a shell session on the instance.
+  </Step>
+
+  <Step title="Run the script">
+    ```bash
+    sudo bash /etc/eks/log-collector-script/eks-log-collector.sh
+    ```
+
+    When the script finishes, it prints the path to the output archive:
+
+    ```
+    Done... your bundled logs are located in /var/log/eks_i-XXXXXXXXXXXXXXXXX_2024-01-15_1430-UTC_0.7.9.tar.gz
+    ```
+  </Step>
+
+  <Step title="Download the archive">
+    Copy the `.tar.gz` file from the node to your local machine using `scp`, `aws s3 cp`, or another secure transfer method.
+
+    ```bash
+    scp ec2-user@<node-ip>:/var/log/eks_*.tar.gz ./
+    ```
+  </Step>
+</Steps>
+
+If the script is not present (for example, on a custom AMI), download it directly:
+
+```bash
+curl -O https://amazon-eks.s3.amazonaws.com/support/log-collector-script/linux/eks-log-collector.sh
+sudo bash eks-log-collector.sh
+```
+
+## Options
+
+```bash
+sudo bash eks-log-collector.sh [OPTIONS]
+```
+
+| Option | Description |
+| --- | --- |
+| `--ignore_introspection=true` | Skip IPAMD introspection. Use this if `DISABLE_INTROSPECTION` is set on the VPC CNI. |
+| `--ignore_metrics=true` | Skip Prometheus metrics collection. Use this if `DISABLE_METRICS` is set on the VPC CNI. |
+| `--eks_hybrid=true` | Indicate that the node is an EKS Hybrid node. Skips IMDS queries for region and instance ID. |
+| `--help` | Print usage information and exit. |
+
+## What the script collects
+
+The script collects data across the following categories:
+
+**Operating system**
+- Kernel logs (`dmesg`, `uname`)
+- System services list and `systemd-analyze` boot timeline
+- Mount points, disk usage, inode counts, `lsblk`, and XFS filesystem info
+- Installed packages (`rpm -qa` or `dpkg --list`)
+- Running processes (`ps`, `top`)
+- SELinux status
+- Sysctl values
+- Reboot history
+
+**Networking**
+- `iptables` and `ip6tables` rules (mangle, filter, nat tables)
+- `ipvsadm` rules (if installed)
+- `ipset` configuration (if installed)
+- `conntrack` connection table
+- Interface configuration (`ifconfig`, `ip rule`, `ip route`)
+- Network policy eBPF map data (if the AWS network policy agent is present)
+- DNS configuration (`resolv.conf`)
+- API server connectivity checks
+- `systemd-networkd` configuration files
+- `ethtool` statistics for all interfaces
+
+**Kubernetes components**
+- kubelet logs (via `journalctl`)
+- kubelet configuration files (`config.json`, `kubelet-config.json`)
+- `kubectl get svc` output (if `kubectl` and a kubeconfig are available)
+- `nodeadm` service logs (`nodeadm-config`, `nodeadm-run`, `nodeadm-boot-hook`)
+
+**Container runtime**
+- containerd configuration (`containerd config dump`)
+- containerd logs (via `journalctl`)
+- containerd goroutine stacks
+- Running containers, images, tasks, and plugins (`ctr`)
+- SOCI snapshotter logs and configuration (if active)
+- sandbox-image service logs
+
+**Networking add-ons**
+- VPC CNI (L-IPAMD) introspection data and Prometheus metrics
+- CNI configuration files (`/etc/cni/net.d/`)
+- CNI environment variables from running containers
+- Multus pod logs (if present)
+
+**Storage**
+- `fstab`
+- LVM information (`lvs`, `pvs`, `vgs`, if installed)
+- Per-pod local storage usage
+
+**GPU**
+- NVIDIA bug report (if NVIDIA drivers are installed)
+
+**Common log files from `/var/log/`**
+- `syslog`, `messages`, `cron`, `cloud-init.log`, `cloud-init-output.log`
+- `kube-proxy.log`, `aws-routed-eni`
+- Selected container and pod logs for kube-system components (aws-node, coredns, kube-proxy, ebs-csi, efs-csi, fsx-csi, s3-csi, eks-pod-identity-agent, eks-node-monitoring-agent)
+
+## Collect logs via SSM
+
+You can run the log collector remotely using AWS Systems Manager and upload the resulting bundle to an S3 bucket, without needing direct SSH access to the node.
+
+<Steps>
+  <Step title="Check prerequisites">
+    - AWS CLI configured with permissions to call `ssm:CreateDocument`, `ssm:SendCommand`, and `ssm:GetCommandInvocation`
+    - SSM Agent installed and running on the worker node
+    - Node IAM role has the `AmazonSSMManagedInstanceCore` managed policy and `s3:PutObject` on your target bucket
+  </Step>
+
+  <Step title="Create the SSM document">
+    ```bash
+    curl -O https://amazon-eks.s3.amazonaws.com/support/log-collector-script/linux/eks-ssm-content.json
+
+    aws ssm create-document \
+      --name "EKSLogCollectorLinux" \
+      --document-type "Command" \
+      --content file://eks-ssm-content.json
+    ```
+  </Step>
+
+  <Step title="Send the command">
+    ```bash
+    aws ssm send-command \
+      --instance-ids <EC2_INSTANCE_ID> \
+      --document-name "EKSLogCollectorLinux" \
+      --parameters "bucketName=<S3_BUCKET_NAME>" \
+      --output json
+    ```
+
+    The command output includes a `CommandId`. Record it for the next step.
+  </Step>
+
+  <Step title="Check the command status">
+    ```bash
+    aws ssm get-command-invocation \
+      --command-id "<COMMAND_ID>" \
+      --instance-id "<EC2_INSTANCE_ID>" \
+      --output text
+    ```
+
+    When the status shows `Success`, the log bundle is in the S3 bucket you specified.
+  </Step>
+</Steps>
+
+## Collect user data
+
+If you need to retrieve the EC2 instance user data as part of troubleshooting, use IMDSv2:
+
+```bash
+TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" \
+  -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+
+curl -H "X-aws-ec2-metadata-token: $TOKEN" \
+  http://169.254.169.254/latest/user-data
+```

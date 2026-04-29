@@ -1,0 +1,289 @@
+---
+title: "NodeConfig: declarative EKS node configuration schema"
+description: "Complete reference for the NodeConfig YAML schema, including all fields for cluster, kubelet, containerd, instance, and feature gates."
+---
+
+`NodeConfig` is the primary configuration object for `nodeadm`. It uses the same Kubernetes-style YAML format as other Kubernetes API objects — with `apiVersion`, `kind`, and `spec` fields — so the structure will be familiar if you have worked with Kubernetes resources before.
+
+```yaml
+---
+apiVersion: node.eks.aws/v1alpha1
+kind: NodeConfig
+spec:
+  cluster: ...
+  kubelet: ...
+  containerd: ...
+  instance: ...
+  featureGates: ...
+```
+
+The API group is `node.eks.aws` and the current version is `v1alpha1`. Refer to [API versioning](#api-versioning) for stability guarantees.
+
+## Complete example
+
+The following `NodeConfig` shows every section with representative values:
+
+```yaml
+---
+apiVersion: node.eks.aws/v1alpha1
+kind: NodeConfig
+spec:
+  cluster:
+    name: my-cluster
+    apiServerEndpoint: https://AAABBBCCC.gr7.us-west-2.eks.amazonaws.com
+    certificateAuthority: Y2VydGlmaWNhdGVBdXRob3JpdHk=
+    cidr: 10.100.0.0/16
+  kubelet:
+    config:
+      shutdownGracePeriod: 30s
+      featureGates:
+        DisableKubeletCloudCredentialProviders: true
+    flags:
+      - "--kube-reserved=cpu=250m,memory=1Gi"
+    maxPodsExpression: "((default_enis - 1) * (ips_per_eni - 1)) + 2"
+  containerd:
+    config: |
+      [plugins."io.containerd.grpc.v1.cri".containerd]
+      discard_unpacked_layers = false
+    baseRuntimeSpec:
+      process:
+        rlimits:
+          - type: RLIMIT_NOFILE
+            soft: 65536
+            hard: 65536
+  instance:
+    localStorage:
+      strategy: RAID0
+      mountPath: /mnt/k8s-disks/
+    environment:
+      default:
+        HTTP_PROXY: http://proxy.example.com:3128
+        NO_PROXY: 169.254.169.254
+    network:
+      nameservers:
+        - 8.8.8.8
+      domains:
+        - example.internal
+  featureGates:
+    InstanceIdNodeName: false
+    FastImagePull: false
+```
+
+---
+
+## `spec.cluster`
+
+`spec.cluster` identifies the EKS cluster this node should join. All four core fields are required for a successful bootstrap.
+
+<ParamField path="spec.cluster.name" type="string" required>
+  The name of your EKS cluster.
+</ParamField>
+
+<ParamField path="spec.cluster.apiServerEndpoint" type="string" required>
+  The HTTPS URL of your cluster's `kube-apiserver`. Retrieve this from the EKS console or the `DescribeCluster` API.
+</ParamField>
+
+<ParamField path="spec.cluster.certificateAuthority" type="string" required>
+  Base64-encoded certificate authority chain for your cluster. Used to verify the API server's TLS certificate.
+</ParamField>
+
+<ParamField path="spec.cluster.cidr" type="string" required>
+  Your cluster's service CIDR block (e.g. `10.100.0.0/16`). `nodeadm` uses this to derive the cluster DNS address.
+</ParamField>
+
+<ParamField path="spec.cluster.enableOutpost" type="boolean" default="false">
+  Set to `true` when this node runs on an AWS Outpost. Changes how the node is configured for the Outpost network topology.
+</ParamField>
+
+<ParamField path="spec.cluster.id" type="string">
+  An identifier for your cluster. Only required when `enableOutpost` is `true`.
+</ParamField>
+
+---
+
+## `spec.kubelet`
+
+`spec.kubelet` passes additional configuration and flags to `kubelet`. The values are merged with the defaults that `nodeadm` generates, so you only need to specify what you want to override.
+
+<ParamField path="spec.kubelet.config" type="object">
+  A partial [`KubeletConfiguration`](https://kubernetes.io/docs/reference/config-api/kubelet-config.v1beta1/) object that is deep-merged with the default configuration. Use this to set any `kubelet` configuration option supported by the Kubernetes API.
+
+  ```yaml
+  kubelet:
+    config:
+      shutdownGracePeriod: 30s
+      featureGates:
+        DisableKubeletCloudCredentialProviders: true
+  ```
+</ParamField>
+
+<ParamField path="spec.kubelet.flags" type="string[]">
+  Additional command-line arguments appended to the `kubelet` invocation. Each element is a single flag string.
+
+  ```yaml
+  kubelet:
+    flags:
+      - "--kube-reserved=cpu=250m,memory=1Gi"
+  ```
+</ParamField>
+
+<ParamField path="spec.kubelet.maxPodsExpression" type="string">
+  A [CEL](https://cel.dev/overview/cel-overview) expression that computes the `maxPods` value for this node. The expression has access to three variables:
+
+  | Variable | Description |
+  | --- | --- |
+  | `default_enis` | Maximum number of network interfaces on the default network card |
+  | `ips_per_eni` | Maximum number of IPv4 addresses per interface |
+  | `max_pods` | Standard `maxPods` for the instance type; equivalent to `(default_enis * (ips_per_eni - 1)) + 2` |
+
+  Any explicit `maxPods` value set in `spec.kubelet.config` takes precedence over the result of this expression. `kubeReserved` is always calculated from the expression result when the expression is present and evaluable.
+
+  ```yaml
+  kubelet:
+    maxPodsExpression: "((default_enis - 1) * (ips_per_eni - 1)) + 2"
+  ```
+
+  <Warning>
+    CEL variable values vary by instance type and may require `ec2:DescribeInstanceTypes` API calls. Test your expression against the intended instance types before deploying.
+  </Warning>
+</ParamField>
+
+---
+
+## `spec.containerd`
+
+`spec.containerd` passes additional configuration to `containerd`. Like `spec.kubelet`, values are merged with the defaults generated by `nodeadm`.
+
+<ParamField path="spec.containerd.config" type="string">
+  An inline [containerd configuration TOML](https://github.com/containerd/containerd/blob/main/docs/man/containerd-config.toml.5.md) document. The provided values overwrite matching defaults.
+
+  ```yaml
+  containerd:
+    config: |
+      [plugins."io.containerd.grpc.v1.cri".containerd]
+      discard_unpacked_layers = false
+  ```
+</ParamField>
+
+<ParamField path="spec.containerd.baseRuntimeSpec" type="object">
+  A partial [OCI runtime specification](https://github.com/opencontainers/runtime-spec) applied to every container. The provided object is merged with the default spec. Use this to override settings such as process limits, namespaces, or resource constraints.
+
+  ```yaml
+  containerd:
+    baseRuntimeSpec:
+      process:
+        rlimits:
+          - type: RLIMIT_NOFILE
+            soft: 65536
+            hard: 65536
+  ```
+</ParamField>
+
+---
+
+## `spec.instance`
+
+`spec.instance` controls how the node's operating system and devices are configured.
+
+### `spec.instance.localStorage`
+
+Controls how [EC2 instance store volumes](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/InstanceStorage.html) are used when available.
+
+<ParamField path="spec.instance.localStorage.strategy" type="string">
+  How to handle local storage devices. Accepted values:
+
+  | Value | Description |
+  | --- | --- |
+  | `RAID0` | Combine all local disks into a single RAID 0 volume (default when local disks are present). |
+  | `RAID10` | Combine local disks into a RAID 10 volume. Requires at least four disks. |
+  | `Mount` | Mount each local disk individually. |
+</ParamField>
+
+<ParamField path="spec.instance.localStorage.mountPath" type="string" default="/mnt/k8s-disks/">
+  The filesystem path where the local storage volume is mounted.
+</ParamField>
+
+<ParamField path="spec.instance.localStorage.disabledMounts" type="string[]">
+  Directories that should not be bind-mounted onto local storage. By default all mounts are enabled.
+
+  | Value | Directory |
+  | --- | --- |
+  | `Containerd` | `/var/lib/containerd` |
+  | `PodLogs` | `/var/log/pods` |
+  | `SOCI` | `/var/lib/soci-snapshotter-grpc` |
+</ParamField>
+
+### `spec.instance.environment`
+
+<ParamField path="spec.instance.environment" type="object">
+  A map of environment variable sets, keyed by target service. Use the reserved key `default` to set variables across all services on the instance. Use a `systemd` service name (e.g. `kubelet`) to scope variables to a single service.
+
+  ```yaml
+  instance:
+    environment:
+      default:
+        HTTP_PROXY: http://proxy.example.com:3128
+        NO_PROXY: 169.254.169.254
+      kubelet:
+        KUBELET_EXTRA_ARGS: "--log-level=4"
+  ```
+</ParamField>
+
+### `spec.instance.network`
+
+<ParamField path="spec.instance.network.nameservers" type="string[]">
+  DNS servers for the instance. Accepts both IPv4 and IPv6 addresses. Configures `systemd-resolved` via the `DNS=` option.
+</ParamField>
+
+<ParamField path="spec.instance.network.domains" type="string[]">
+  Search domains for the instance's name resolution. Configures `systemd-resolved` via the `Domains=` option.
+
+  ```yaml
+  instance:
+    network:
+      nameservers:
+        - 8.8.8.8
+        - 2001:4860:4860::8888
+      domains:
+        - example.internal
+  ```
+</ParamField>
+
+---
+
+## `spec.featureGates`
+
+Feature gates enable or disable experimental behaviors. Each gate is a boolean key under `spec.featureGates`.
+
+<ParamField path="spec.featureGates.InstanceIdNodeName" type="boolean" default="false">
+  When enabled, `nodeadm` uses the EC2 instance ID (e.g. `i-0abc123def456`) as the Kubernetes `Node` name instead of the private DNS name (e.g. `ip-192-168-1-1.ec2.internal`).
+
+  Benefits:
+  - Node names are stable — an instance ID never changes, unlike a private DNS name.
+  - The `ec2:DescribeInstances` permission can be removed from the node IAM role.
+  - Node names are more readable in `kubectl get nodes` output.
+
+  <Warning>
+    Enabling this gate requires a new worker node IAM role configured with `system:node:{{"{{"}}SessionName{{"}}"}}` as the username. Create a new role rather than modifying an existing one to avoid authentication failures on already-running nodes.
+  </Warning>
+</ParamField>
+
+<ParamField path="spec.featureGates.FastImagePull" type="boolean" default="false">
+  When enabled, `nodeadm` configures `containerd` to pull and unpack container images in parallel. This can reduce image pull time on large images at the cost of increased CPU, memory, and EBS I/O during the pull.
+
+  <Note>
+    This gate has no effect on instance types below a minimum vCPU and memory threshold. Amazon recommends a `2xlarge` instance type or larger, and at least 600 MiB/s EBS throughput on the root volume.
+  </Note>
+</ParamField>
+
+---
+
+## API versioning
+
+The `node.eks.aws` API group uses versioning aligned with the [Kubernetes API versioning model](https://kubernetes.io/docs/reference/using-api/#api-versioning).
+
+| Stability | Example | Support policy |
+| --- | --- | --- |
+| Alpha (current) | `v1alpha1` | Support may be removed at any time; incompatible changes may appear without migration instructions. |
+| Beta | `v3beta4` | Support is maintained for at least one release after deprecation; migration instructions are provided. |
+| Stable | `v5` | Support aligns with the support lifecycle of a major Amazon Linux version. |

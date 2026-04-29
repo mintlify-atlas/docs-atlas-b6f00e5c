@@ -1,0 +1,157 @@
+---
+title: "Configure ephemeral NVMe instance storage on EKS nodes"
+description: "Manage EC2 instance store NVMe disks on EKS worker nodes using nodeadm's LocalStorageOptions — RAID-0, RAID-10, or individual disk mounts."
+---
+
+Some EC2 instance types — including i3, i4i, c5d, and c6id — ship with one or more ephemeral NVMe instance store disks attached. These disks are not persisted across stop/start cycles, but they offer high throughput and low latency for workloads that need fast local I/O. The EKS-optimized AMI can configure these disks automatically at node boot using `nodeadm`'s `LocalStorageOptions` API.
+
+All disk modes format every discovered NVMe instance store disk with an **XFS** filesystem before use.
+
+## How it works
+
+When `nodeadm` initializes a node, it detects any NVMe instance store disks and applies the strategy you configure in `spec.instance.localStorage`. If no strategy is set, the disks are left unconfigured.
+
+Set the strategy in your `NodeConfig` user data:
+
+```yaml
+apiVersion: node.eks.aws/v1alpha1
+kind: NodeConfig
+spec:
+  cluster:
+    name: my-cluster
+    apiServerEndpoint: https://example.com
+    certificateAuthority: Y2VydGlmaWNhdGVBdXRob3JpdHk=
+    cidr: 10.100.0.0/16
+  instance:
+    localStorage:
+      strategy: RAID0   # RAID0 | RAID10 | Mount
+```
+
+## Storage strategies
+
+<Tabs>
+  <Tab title="RAID0">
+    RAID-0 stripes all ephemeral NVMe disks into a single volume and mounts it for use by kubelet and containerd. This maximizes usable capacity and I/O throughput across all disks, at the cost of no redundancy — the failure of any single disk makes the entire array unavailable.
+
+    The RAID-0 volume is mounted under the following directories by default:
+
+    - `/var/lib/containerd` — container image layers and snapshots
+    - `/var/lib/kubelet` — kubelet state and pod volumes
+    - `/var/log/pods` — pod log files
+    - `/var/lib/soci-snapshotter-grpc` — SOCI snapshotter data (if active)
+
+    This makes fast ephemeral storage available for pod `emptyDir` volumes, container images, and kubelet's ephemeral-storage accounting.
+
+    ```yaml
+    apiVersion: node.eks.aws/v1alpha1
+    kind: NodeConfig
+    spec:
+      cluster:
+        name: my-cluster
+        apiServerEndpoint: https://example.com
+        certificateAuthority: Y2VydGlmaWNhdGVBdXRob3JpdHk=
+        cidr: 10.100.0.0/16
+      instance:
+        localStorage:
+          strategy: RAID0
+    ```
+
+    <Tip>
+      RAID-0 is the simplest strategy for maximizing raw throughput on instance types with multiple NVMe disks. Use it when redundancy is not a requirement and you want all disk capacity pooled.
+    </Tip>
+  </Tab>
+
+  <Tab title="RAID10">
+    RAID-10 combines mirroring and striping across all ephemeral NVMe disks. It tolerates the failure of up to two disks in the array. Because individual ephemeral disks cannot be hot-swapped, the primary purpose of RAID-10 is to allow graceful node decommissioning — the node remains available even if a disk fails before you can drain and terminate it.
+
+    <Warning>
+      RAID-10 requires **four or more** NVMe instance store disks. Nodes with fewer than four disks will fail to configure storage with this strategy. Check the AWS documentation for instance store disk counts before selecting RAID-10.
+    </Warning>
+
+    ```yaml
+    apiVersion: node.eks.aws/v1alpha1
+    kind: NodeConfig
+    spec:
+      cluster:
+        name: my-cluster
+        apiServerEndpoint: https://example.com
+        certificateAuthority: Y2VydGlmaWNhdGVBdXRob3JpdHk=
+        cidr: 10.100.0.0/16
+      instance:
+        localStorage:
+          strategy: RAID10
+    ```
+
+    Like RAID-0, the RAID-10 volume is mounted at the same default directories for kubelet and containerd.
+  </Tab>
+
+  <Tab title="Mount">
+    The `Mount` strategy formats each NVMe disk individually and mounts them under separate subdirectories of `mountPath` (default: `/mnt/k8s-disks/`). This leaves each disk accessible as a distinct mount point rather than aggregating them into a single volume.
+
+    Use this strategy with the [local-static-provisioner](https://github.com/kubernetes-sigs/sig-storage-local-static-provisioner) DaemonSet, which discovers the mounted disks and creates `PersistentVolume` objects that pods can claim via `PersistentVolumeClaim`.
+
+    ```yaml
+    apiVersion: node.eks.aws/v1alpha1
+    kind: NodeConfig
+    spec:
+      cluster:
+        name: my-cluster
+        apiServerEndpoint: https://example.com
+        certificateAuthority: Y2VydGlmaWNhdGVBdXRob3JpdHk=
+        cidr: 10.100.0.0/16
+      instance:
+        localStorage:
+          strategy: Mount
+          mountPath: /mnt/k8s-disks
+    ```
+
+    <Note>
+      When using `Mount`, kubelet and containerd continue to use the root EBS volume. The mounted disks are available exclusively for pods that request them via local `PersistentVolumes`.
+    </Note>
+  </Tab>
+</Tabs>
+
+## Mount path
+
+The `mountPath` field controls where individually mounted disks (the `Mount` strategy) are placed. It defaults to `/mnt/k8s-disks/`. You can override it to match your `local-static-provisioner` discovery directory:
+
+```yaml
+instance:
+  localStorage:
+    strategy: Mount
+    mountPath: /mnt/fast-disks
+```
+
+`mountPath` has no effect when the strategy is `RAID0` or `RAID10`, since those strategies create a single array volume mounted at the kubelet and containerd state directories.
+
+## Disabled mounts
+
+For `RAID0` and `RAID10` strategies, `nodeadm` bind-mounts the array volume under several directories by default. You can exclude specific directories from being mounted using `disabledMounts`:
+
+| Value | Directory |
+| --- | --- |
+| `Containerd` | `/var/lib/containerd` |
+| `PodLogs` | `/var/log/pods` |
+| `SOCI` | `/var/lib/soci-snapshotter-grpc` |
+
+The following example configures a RAID-0 array but keeps pod logs on the root volume:
+
+```yaml
+apiVersion: node.eks.aws/v1alpha1
+kind: NodeConfig
+spec:
+  cluster:
+    name: my-cluster
+    apiServerEndpoint: https://example.com
+    certificateAuthority: Y2VydGlmaWNhdGVBdXRob3JpdHk=
+    cidr: 10.100.0.0/16
+  instance:
+    localStorage:
+      strategy: RAID0
+      disabledMounts:
+        - PodLogs
+```
+
+<Info>
+  All mounts are enabled by default. Specify only the directories you want to exclude.
+</Info>

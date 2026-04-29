@@ -1,81 +1,117 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
-icon: 'rocket'
+title: "Quickstart: build an EKS-optimized AMI with Packer"
+description: "Install Packer and AWS credentials, build an EKS-optimized AMI for Amazon Linux 2023, and configure a worker node to join your cluster with nodeadm."
 ---
 
-## Get started in three steps
-
-Get your documentation site running locally and make your first customization.
-
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+This guide walks you through building a custom EKS-optimized AMI using the same Packer configuration Amazon EKS uses for its official AMIs, then launching a worker node that joins your cluster. The process takes about 15–30 minutes, most of which is Packer provisioning the build instance.
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  The default instance type used to build this AMI (`m5.large`) does not qualify for the AWS free tier. You are charged for any EC2 instances created during the build.
 </Note>
+
+<Steps>
+  <Step title="Install prerequisites">
+    You need [Packer](https://www.packer.io/downloads) version 1.8.0 or later.
+
+    ```bash
+    # Verify your Packer version
+    packer version
+    ```
+
+    The output should show `Packer v1.8.0` or higher. If Packer is not installed, download it from [packer.io/downloads](https://www.packer.io/downloads).
+
+    You also need AWS credentials configured so Packer can make API calls on your behalf. Set them via environment variables or a named profile:
+
+    ```bash
+    export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+    export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+    export AWS_DEFAULT_REGION=us-west-2
+    ```
+
+    Your IAM principal needs EC2, EKS, ECR, and S3 permissions. See [IAM permissions](/building/iam-permissions) for the full policy document.
+  </Step>
+
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/awslabs/amazon-eks-ami.git
+    cd amazon-eks-ami
+    ```
+
+    Run `make help` to see all available build targets and variables:
+
+    ```bash
+    make help
+    ```
+
+    The output lists targets such as `build`, `k8s`, and `validate`, along with the variables each accepts.
+  </Step>
+
+  <Step title="Discover the latest Kubernetes binaries">
+    The `hack/latest-binaries.sh` script queries the public `amazon-eks` S3 bucket and returns the most recent Kubernetes version and build date for a given minor version and region. Using the latest binaries ensures you get the most recent bug and security fixes.
+
+    ```bash
+    hack/latest-binaries.sh 1.33 us-west-2
+    ```
+
+    Example output:
+
+    ```
+    kubernetes_version=1.33.0 kubernetes_build_date=2025-04-01
+    ```
+
+    The `make build` target runs this script automatically. You only need to call it directly if you want to pin a specific binary version.
+  </Step>
+
+  <Step title="Build the AMI">
+    Run `make` with your target Kubernetes minor version and OS distribution. The `build` target automatically resolves the latest binaries, provisions a temporary EC2 instance, and registers the resulting snapshot as an AMI.
+
+    ```bash
+    make k8s=1.33 os_distro=al2023
+    ```
+
+    For ARM instances, add `arch=arm64`:
+
+    ```bash
+    make k8s=1.33 os_distro=al2023 arch=arm64
+    ```
+
+    When the build completes, Packer prints the new AMI ID. Record it for the next step.
+  </Step>
+
+  <Step title="Launch nodes with nodeadm user data">
+    Use the AMI ID from the previous step to launch EC2 instances as worker nodes. On AL2023-based AMIs, `nodeadm` runs automatically at boot via a `systemd` service and reads its configuration from the EC2 instance user data.
+
+    Pass your cluster configuration as a MIME multi-part user data document:
+
+    ```
+    MIME-Version: 1.0
+    Content-Type: multipart/mixed; boundary="BOUNDARY"
+
+    --BOUNDARY
+    Content-Type: application/node.eks.aws
+
+    ---
+    apiVersion: node.eks.aws/v1alpha1
+    kind: NodeConfig
+    spec:
+      cluster:
+        name: my-cluster
+        apiServerEndpoint: https://example.com
+        certificateAuthority: Y2VydGlmaWNhdGVBdXRob3JpdHk=
+        cidr: 10.100.0.0/16
+
+    --BOUNDARY--
+    ```
+
+    Replace `name`, `apiServerEndpoint`, `certificateAuthority`, and `cidr` with the values for your EKS cluster. You can retrieve these with the AWS CLI:
+
+    ```bash
+    aws eks describe-cluster --name my-cluster \
+      --query 'cluster.{endpoint:endpoint,ca:certificateAuthority.data,cidr:kubernetesNetworkConfig.serviceIpv4Cidr}'
+    ```
+
+    Once the instance starts, `nodeadm init` runs automatically and the node registers with your cluster.
+
+    For more configuration options — kubelet flags, containerd settings, and instance storage — see the [nodeadm configuration reference](/nodeadm/configuration).
+  </Step>
+</Steps>

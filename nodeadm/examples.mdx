@@ -1,0 +1,285 @@
+---
+title: "nodeadm configuration examples for common use cases"
+description: "Practical NodeConfig examples for merging configurations, feature gates, containerd tuning, RLIMIT overrides, and max pods expressions."
+---
+
+These examples cover the most common `nodeadm` configuration scenarios. Each example shows a complete `NodeConfig` YAML document (or the relevant section) that you can adapt for your environment. Where multi-step setup is required, the steps are called out explicitly.
+
+---
+
+## Merging multiple configuration objects
+
+When using the `imds://user-data` configuration source, `nodeadm` merges all `NodeConfig` parts it finds in the MIME multi-part document before configuring the node. Parts are merged in the order they appear, so later parts take precedence over earlier ones.
+
+This lets you split cluster-level configuration from node-level tuning, which is useful when the two are managed by different teams or automation systems.
+
+**User data:**
+
+```
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="BOUNDARY"
+
+--BOUNDARY
+Content-Type: application/node.eks.aws
+
+---
+apiVersion: node.eks.aws/v1alpha1
+kind: NodeConfig
+spec:
+  cluster:
+    name: my-cluster
+    apiServerEndpoint: https://example.com
+    certificateAuthority: Y2VydGlmaWNhdGVBdXRob3JpdHk=
+    cidr: 10.100.0.0/16
+
+--BOUNDARY
+Content-Type: application/node.eks.aws
+
+---
+apiVersion: node.eks.aws/v1alpha1
+kind: NodeConfig
+spec:
+  kubelet:
+    config:
+      shutdownGracePeriod: 30s
+      featureGates:
+        DisableKubeletCloudCredentialProviders: true
+
+--BOUNDARY--
+```
+
+**Effective configuration after merge:**
+
+```yaml
+---
+apiVersion: node.eks.aws/v1alpha1
+kind: NodeConfig
+spec:
+  cluster:
+    name: my-cluster
+    apiServerEndpoint: https://example.com
+    certificateAuthority: Y2VydGlmaWNhdGVBdXRob3JpdHk=
+    cidr: 10.100.0.0/16
+  kubelet:
+    config:
+      shutdownGracePeriod: 30s
+      featureGates:
+        DisableKubeletCloudCredentialProviders: true
+```
+
+You can inspect the merged result at any time with `nodeadm config dump`.
+
+---
+
+## Using instance ID as node name
+
+<AccordionGroup>
+  <Accordion title="What this does" defaultOpen={true}>
+    When the `InstanceIdNodeName` feature gate is enabled, `nodeadm` uses the EC2 instance ID (e.g. `i-0abc1234def5678`) as the Kubernetes `Node` name instead of the private DNS name (e.g. `ip-192-168-1-1.ec2.internal`).
+
+    Benefits:
+    - Node names are stable — an instance ID never changes, unlike a private DNS name.
+    - The `ec2:DescribeInstances` permission can be removed from the node IAM role.
+    - `kubectl get nodes` output is easier to correlate with the EC2 console.
+  </Accordion>
+</AccordionGroup>
+
+<Steps>
+  <Step title="Create a new worker node IAM role">
+    Create a dedicated IAM role for nodes that will use this feature. Do not reuse an existing role — changing the username format for an existing role will break authentication for nodes already using it.
+
+    See [Creating an Amazon EKS node IAM role](https://docs.aws.amazon.com/eks/latest/userguide/create-node-role.html#create-worker-node-role) in the EKS User Guide.
+
+    <Warning>
+      Always create a new role when enabling `InstanceIdNodeName` on an existing cluster, to avoid disrupting nodes that are already running.
+    </Warning>
+  </Step>
+
+  <Step title="Configure authorization with the correct username format">
+    Create an access entry of type `EC2` for the new role. This configures the EKS authentication layer to accept `system:node:{{"{{"}}SessionName{{"}}"}}` as the node username.
+
+    ```bash
+    aws eks create-access-entry \
+      --cluster-name $CLUSTER_NAME \
+      --principal-arn $ROLE_CREATED_ABOVE \
+      --type EC2
+    ```
+
+    <Note>
+      You can also use the legacy `aws-auth` ConfigMap, but EKS Managed Node Groups require access entries.
+    </Note>
+  </Step>
+
+  <Step title="Enable the feature gate in your user data">
+    Add the `InstanceIdNodeName` feature gate to your `NodeConfig`:
+
+    ```yaml
+    ---
+    apiVersion: node.eks.aws/v1alpha1
+    kind: NodeConfig
+    spec:
+      featureGates:
+        InstanceIdNodeName: true
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Enabling fast image pull (experimental)
+
+The `FastImagePull` feature gate configures `containerd` to pull and unpack container images in parallel. This can reduce cold-start time when a node needs to pull a large image before any workloads can run.
+
+**Trade-offs:** increased CPU, memory, and EBS I/O during the image pull. This feature is most beneficial when pulling large images early in a node's lifecycle, before other workloads are scheduled.
+
+<Steps>
+  <Step title="Verify your instance type and EBS throughput">
+    This feature has no effect below a minimum vCPU and memory threshold. Use a `2xlarge` instance type or larger as a starting point.
+
+    Configure at least 600 MiB/s throughput on the root EBS volume. Values up to 1000 MiB/s with 16k IOPs can improve performance further.
+  </Step>
+
+  <Step title="Confirm workload tolerance">
+    Make sure your workloads can tolerate the increased resource consumption during image pull. If other workloads are already running on the node when a large image pull begins, they may see resource contention.
+  </Step>
+
+  <Step title="Enable the feature gate in your user data">
+    ```yaml
+    ---
+    apiVersion: node.eks.aws/v1alpha1
+    kind: NodeConfig
+    spec:
+      featureGates:
+        FastImagePull: true
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Configuring containerd
+
+You can supply additional `containerd` configuration as inline TOML in `spec.containerd.config`. The values you provide overwrite matching defaults set by `nodeadm`.
+
+The following example disables deletion of unpacked image layers from the `containerd` content store. This preserves layers on disk after image pull, which can speed up subsequent pulls of images that share layers.
+
+```yaml
+---
+apiVersion: node.eks.aws/v1alpha1
+kind: NodeConfig
+spec:
+  cluster: ...
+  containerd:
+    config: |
+      [plugins."io.containerd.grpc.v1.cri".containerd]
+      discard_unpacked_layers = false
+```
+
+<Tip>
+  The full list of `containerd` configuration options is documented in the [containerd-config.toml man page](https://github.com/containerd/containerd/blob/main/docs/man/containerd-config.toml.5.md).
+</Tip>
+
+---
+
+## Modifying container RLIMITs
+
+If your workloads require different resource limits than the defaults, use `spec.containerd.baseRuntimeSpec` to override them. The object you provide is merged with the default OCI runtime spec and applied to every container on the node.
+
+The following example lowers the open-file descriptor limit (`RLIMIT_NOFILE`) to 1024:
+
+```yaml
+---
+apiVersion: node.eks.aws/v1alpha1
+kind: NodeConfig
+spec:
+  cluster: ...
+  containerd:
+    baseRuntimeSpec:
+      process:
+        rlimits:
+          - type: RLIMIT_NOFILE
+            soft: 1024
+            hard: 1024
+```
+
+<Note>
+  `baseRuntimeSpec` accepts any field from the [OCI Runtime Specification](https://github.com/opencontainers/runtime-spec). You can override namespaces, capabilities, seccomp profiles, and more.
+</Note>
+
+---
+
+## Defining a max pods expression
+
+`spec.kubelet.maxPodsExpression` accepts a [CEL](https://cel.dev/overview/cel-overview) expression that computes the `maxPods` value for the node. This is useful when you need to adjust the default calculation to account for ENI reservations, CNI custom networking, or a fixed pod ceiling.
+
+The expression has access to three variables:
+
+| Variable | Description |
+| --- | --- |
+| `default_enis` | Maximum number of network interfaces on the default network card |
+| `ips_per_eni` | Maximum number of IPv4 addresses per interface |
+| `max_pods` | Standard `maxPods` for the instance type; equivalent to `(default_enis * (ips_per_eni - 1)) + 2` |
+
+<AccordionGroup>
+  <Accordion title="Offset max pods to account for host networking pods">
+    Allow two extra pod slots beyond the standard calculation, for known host-networking pods:
+
+    ```yaml
+    ---
+    apiVersion: node.eks.aws/v1alpha1
+    kind: NodeConfig
+    spec:
+      cluster: ...
+      kubelet:
+        maxPodsExpression: "max_pods + 2"
+    ```
+  </Accordion>
+
+  <Accordion title="Cap max pods at a fixed value">
+    Limit the node to 30 pods regardless of instance type:
+
+    ```yaml
+    ---
+    apiVersion: node.eks.aws/v1alpha1
+    kind: NodeConfig
+    spec:
+      cluster: ...
+      kubelet:
+        maxPodsExpression: "max_pods < 30 ? max_pods : 30"
+    ```
+  </Accordion>
+
+  <Accordion title="Reserve ENIs for the primary network interface">
+    Reserve three ENIs, for example when using AWS VPC CNI custom networking that requires a dedicated ENI:
+
+    ```yaml
+    ---
+    apiVersion: node.eks.aws/v1alpha1
+    kind: NodeConfig
+    spec:
+      cluster: ...
+      kubelet:
+        maxPodsExpression: "((default_enis - 3) * (ips_per_eni - 1)) + 2"
+    ```
+  </Accordion>
+
+  <Accordion title="Full example with cluster details">
+    ```yaml
+    ---
+    apiVersion: node.eks.aws/v1alpha1
+    kind: NodeConfig
+    spec:
+      cluster:
+        name: my-cluster
+        apiServerEndpoint: https://example.com
+        certificateAuthority: Y2VydGlmaWNhdGVBdXRob3JpdHk=
+        cidr: 10.100.0.0/16
+      kubelet:
+        maxPodsExpression: "((default_enis - 1) * (ips_per_eni - 1)) + 2"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+  `maxPodsExpression` values vary between instance types and may require `ec2:DescribeInstanceTypes` API calls. Test your expression against the target instance types before deploying to production. Any explicit `maxPods` value in `spec.kubelet.config` takes precedence over the expression result.
+</Warning>

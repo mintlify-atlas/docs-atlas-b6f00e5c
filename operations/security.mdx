@@ -1,0 +1,87 @@
+---
+title: "Security hardening features for EKS-optimized AMIs"
+description: "Configure FIPS-mode builds, manage version-locked packages, and understand the ECR credential provider and vulnerability reporting for EKS AMIs."
+---
+
+The EKS-optimized AMI includes several security-oriented features: an optional FIPS build mode, version-locked packages that protect the node's critical components from unintended updates, and an ECR credential provider for authenticated image pulls. This page explains each feature and how to work with them.
+
+## FIPS builds
+
+Federal Information Processing Standards (FIPS) mode configures the AMI to use a FIPS-validated cryptographic module and sets the required kernel parameters for FIPS compliance.
+
+To build a FIPS-enabled AMI, pass `enable_fips=true` as a Packer variable:
+
+```bash
+make k8s=1.33 os_distro=al2023 enable_fips=true
+```
+
+When `enable_fips=true` is set, the build:
+
+- Installs the FIPS-compliant OpenSSL package
+- Enables FIPS-related kernel parameters at boot
+
+<Note>
+  FIPS mode applies at AMI build time — you cannot enable or disable it on a running node without rebuilding the AMI.
+</Note>
+
+### FIPS ECR endpoint
+
+If you are building with container image caching enabled and need images pulled from a FIPS endpoint, update the registry URI to use the FIPS ECR endpoint:
+
+```
+<ACCOUNT_ID>.dkr.ecr-fips.<REGION>.<DOMAIN>
+```
+
+For a complete list of region-specific registry addresses, see the [Amazon EKS add-on container image addresses](https://docs.aws.amazon.com/eks/latest/userguide/add-ons-images.html) in the EKS User Guide.
+
+## Version-locked packages
+
+Some packages are critical for the correct and stable behavior of a Kubernetes node. Unintentional upgrades to these packages — for example, a kernel update that changes behavior — can disrupt running workloads or prevent the node from rejoining the cluster. To prevent this, the EKS-optimized AMI uses the `yum-versionlock` plugin to pin these packages to the versions that were validated during the AMI build.
+
+Packages that are locked include:
+
+- `kernel`
+- `containerd`
+- `runc`
+
+<Warning>
+  Modifying locked packages outside of a controlled process can destabilize your nodes. Always test package upgrades in a non-production environment and use a managed rollout strategy (such as replacing the node group AMI) to apply changes safely.
+</Warning>
+
+To see the full list of locked packages on a running node:
+
+```bash
+sudo yum versionlock list
+```
+
+### Unlocking packages
+
+If you need to upgrade or replace a locked package, you can remove the lock using `yum versionlock`:
+
+```bash
+# Unlock a single package
+sudo yum versionlock delete $PACKAGE_NAME
+
+# Unlock all locked packages
+sudo yum versionlock clear
+```
+
+After unlocking, you can install or upgrade the package with the usual `yum` commands. Re-running `yum versionlock add` is recommended once you have confirmed the new version is stable on your nodes.
+
+## ECR credential provider
+
+For Kubernetes 1.27 and later, the EKS-optimized AMI includes the ECR credential provider plugin, which replaces the legacy in-tree kubelet credential process. The provider runs as a separate binary and is called by kubelet whenever an image pull from an Amazon ECR registry requires authentication.
+
+The credential provider:
+
+- Automatically detects ECR registry URLs (both standard and FIPS endpoints)
+- Fetches temporary credentials using the node's IAM role (via the EC2 instance profile)
+- Caches credentials for the duration of the token's validity to reduce API calls
+
+No additional configuration is required on standard EKS-optimized AMIs — kubelet is configured to call the credential provider binary automatically. If you are building a custom AMI or using a custom kubelet configuration, ensure the `credentialProviderConfig` in your kubelet config points to the correct binary path.
+
+## Reporting security vulnerabilities
+
+Do not use GitHub issues to report suspected security vulnerabilities in the EKS-optimized AMI or any AWS-maintained software.
+
+Instead, follow the [AWS vulnerability reporting process](https://aws.amazon.com/security/vulnerability-reporting/) to contact the AWS Security team directly. AWS reviews all reports and coordinates disclosure with affected teams.

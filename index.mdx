@@ -1,133 +1,73 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
-icon: 'star'
+title: "Amazon EKS AMI: build custom EKS worker node images"
+description: "Official Packer configuration for building custom Amazon EKS-optimized AMIs on Amazon Linux 2023, with nodeadm for declarative node initialization."
 ---
 
-## Setting up
+Amazon EKS AMI is the same Packer-based build specification that AWS uses to create the official EKS-optimized AMIs. Use it to build custom nodes with your own configuration, Kubernetes version, or hardware acceleration requirements — and initialize them declaratively with `nodeadm`.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Build your first EKS-optimized AMI in minutes with Packer and the Makefile
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Building AMIs" icon="box" href="/building/overview">
+    Explore Packer template variables, Kubernetes binary options, and build customization
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="nodeadm" icon="gear" href="/nodeadm/overview">
+    Configure EKS nodes declaratively using the NodeConfig YAML API
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="API Reference" icon="code" href="/reference/api">
+    Full reference for the NodeConfig API types and all configuration fields
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## What's included
 
-Everything you need to create world-class documentation.
+The Amazon EKS AMI repository provides everything you need to build production-ready Kubernetes worker nodes on AWS:
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
+<CardGroup cols={2}>
+  <Card title="AL2023 Packer templates" icon="layer-group" href="/building/al2023">
+    Build AMIs for Amazon Linux 2023 with full Kubernetes toolchain pre-installed
   </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
+  <Card title="Accelerated instances" icon="microchip" href="/building/accelerated">
+    NVIDIA GPU and AWS Neuron driver support for ML/inference workloads
   </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
+  <Card title="nodeadm configuration" icon="file-code" href="/nodeadm/configuration">
+    Kubernetes-style YAML for kubelet, containerd, and instance configuration
   </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
+  <Card title="Storage management" icon="hard-drive" href="/operations/storage">
+    Configure NVMe ephemeral storage with RAID-0, RAID-10, or mount strategies
   </Card>
-</Columns>
+  <Card title="IAM permissions" icon="shield" href="/building/iam-permissions">
+    Minimal IAM policy required to run Packer AMI builds in your AWS account
+  </Card>
+  <Card title="Log collector" icon="magnifying-glass" href="/operations/log-collector">
+    Gather node diagnostics and OS logs for EKS support and troubleshooting
+  </Card>
+</CardGroup>
 
-## Make your content agent ready
+## Get started
 
-Make your docs work for humans and AI agents alike.
+<Steps>
+  <Step title="Install prerequisites">
+    Install [Packer](https://www.packer.io/) v1.8.0 or later and configure AWS credentials with the required IAM permissions.
+  </Step>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/awslabs/amazon-eks-ami.git
+    cd amazon-eks-ami
+    ```
+  </Step>
+  <Step title="Build an AMI">
+    ```bash
+    make k8s=1.33 os_distro=al2023
+    ```
+    This builds an EKS-optimized AMI for Kubernetes 1.33 on Amazon Linux 2023 in `us-west-2`.
+  </Step>
+  <Step title="Configure your nodes">
+    Use `nodeadm` and the `NodeConfig` API to initialize nodes at launch by providing configuration in your EC2 instance's user data.
+  </Step>
+</Steps>
 
-<Columns cols={2}>
-  <Card
-    title="Prompt component"
-    icon="robot"
-    href="/agent-ready/prompt"
-  >
-    Embed shareable AI prompts readers can copy or open in Cursor.
-  </Card>
-  <Card
-    title="Visibility"
-    icon="eye"
-    href="/agent-ready/visibility"
-  >
-    Show different content to humans and agents reading your docs.
-  </Card>
-  <Card
-    title="Contextual menu"
-    icon="bolt"
-    href="/agent-ready/contextual"
-  >
-    Give readers one-click access to Claude, ChatGPT, Cursor, and more.
-  </Card>
-  <Card
-    title="AI coding tools"
-    icon="wand-magic-sparkles"
-    href="/ai-tools/claude-code"
-  >
-    Set up Claude Code, Cursor, or Windsurf with Mintlify's skill.
-  </Card>
-</Columns>
-
-## Need inspiration?
-
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<Note>
+  Amazon EKS stopped publishing EKS-optimized Amazon Linux 2 (AL2) AMIs on November 26, 2025. AL2023 is the current supported distribution for all Kubernetes versions 1.33 and higher.
+</Note>

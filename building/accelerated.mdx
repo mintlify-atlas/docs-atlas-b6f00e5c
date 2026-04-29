@@ -1,0 +1,108 @@
+---
+title: "Build EKS AMIs for NVIDIA GPUs, AWS Neuron, and EFA"
+description: "Build EKS-optimized AMIs with NVIDIA GPU drivers, AWS Neuron SDK, and Elastic Fabric Adapter (EFA) support for accelerated compute and HPC workloads."
+---
+
+The AL2023 template supports accelerated builds that install GPU drivers and networking software needed for ML and high-performance workloads. Use `enable_accelerator` to select the accelerator type, and `enable_efa` to add EFA support.
+
+## NVIDIA GPU builds
+
+Set `enable_accelerator=nvidia` to install the NVIDIA driver and container runtime configuration during the AMI build.
+
+```bash
+make build os_distro=al2023 k8s=1.31 enable_accelerator=nvidia
+```
+
+<Warning>
+Building an NVIDIA AMI requires acceptance of the [NVIDIA EULA](https://www.nvidia.com/content/DriverDownload-March2009/licence.php?lang=us). By running this build you agree to those terms. The build must be run on an NVIDIA-capable instance type (for example `g4dn.xlarge`) or on a compatible CPU build instance.
+</Warning>
+
+### Driver version
+
+The `nvidia_driver_major_version` variable controls which major driver series is installed. The default is `580`.
+
+```bash
+make build os_distro=al2023 k8s=1.31 \
+  enable_accelerator=nvidia \
+  nvidia_driver_major_version=560
+```
+
+To see which driver major versions are available, browse the NVIDIA AL2023 repository:
+
+```
+https://developer.download.nvidia.com/compute/cuda/repos/amzn2023/
+```
+
+### Custom repository URL
+
+By default, driver packages are fetched from the official NVIDIA CUDA repository. Use `nvidia_repository_url` to override this with a mirror or a private repository:
+
+```bash
+make build os_distro=al2023 k8s=1.31 \
+  enable_accelerator=nvidia \
+  nvidia_repository_url=https://my-mirror.example.com/nvidia/amzn2023/
+```
+
+## AWS Neuron builds
+
+Set `enable_accelerator=neuron` to install the AWS Neuron SDK and runtime configuration for use with AWS Inferentia and Trainium instances.
+
+```bash
+make build os_distro=al2023 k8s=1.31 enable_accelerator=neuron
+```
+
+## EFA support
+
+Elastic Fabric Adapter (EFA) enables high-bandwidth, low-latency networking for tightly-coupled distributed workloads. Set `enable_efa=true` to install the EFA software stack:
+
+```bash
+make build os_distro=al2023 k8s=1.31 enable_efa=true
+```
+
+EFA is commonly combined with an accelerator for HPC and distributed training workloads:
+
+<Tabs>
+  <Tab title="NVIDIA + EFA">
+    ```bash
+    make build os_distro=al2023 k8s=1.31 \
+      enable_accelerator=nvidia \
+      enable_efa=true
+    ```
+  </Tab>
+  <Tab title="Neuron + EFA">
+    ```bash
+    make build os_distro=al2023 k8s=1.31 \
+      enable_accelerator=neuron \
+      enable_efa=true
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+When `enable_accelerator` is set to `nvidia` or `neuron`, EFA support is added automatically even if `enable_efa` is not explicitly set to `true`.
+</Note>
+
+## AMI naming
+
+When you set `enable_accelerator`, the accelerator type is appended to the AMI name automatically. For example, a Neuron build produces an AMI named:
+
+```
+amazon-eks-al2023-neuron-node-1.31-v20241015
+```
+
+And an NVIDIA build:
+
+```
+amazon-eks-al2023-nvidia-node-1.31-v20241015
+```
+
+## Relevant template variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `enable_accelerator` | _(empty)_ | Accelerator type: `nvidia` or `neuron` |
+| `enable_efa` | `false` | Install EFA networking software |
+| `nvidia_driver_major_version` | `580` | NVIDIA driver major version to install |
+| `nvidia_repository_url` | _(null)_ | YUM/DNF repository override for NVIDIA packages |
+| `nvidia_grid_runfile_bucket_name` | `ec2-linux-nvidia-drivers` | S3 bucket for the NVIDIA GRID runfile |
+| `launch_block_device_mappings_volume_size` | `20` | Root volume size in GiB; increase for large driver installs |

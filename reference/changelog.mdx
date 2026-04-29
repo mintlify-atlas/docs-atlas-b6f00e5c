@@ -1,0 +1,56 @@
+---
+title: "EKS-optimized AMI release notes and package versions"
+description: "Per-release summary of AMI versions, source AMI names, Kubernetes versions, and included package versions for the Amazon EKS-optimized AMI."
+---
+
+Each Amazon EKS AMI release is tagged with a date-based version (e.g. `v20260415`) and covers all supported Kubernetes minor versions. The release notes include the source AMI names, per-variant package versions, and links to the full artifact set on S3.
+
+<Note>
+  This page shows only the most recent release. For the complete release history, see the [GitHub releases page](https://github.com/awslabs/amazon-eks-ami/releases) and the [CHANGELOG.md](https://github.com/awslabs/amazon-eks-ami/blob/main/CHANGELOG.md) in the repository.
+</Note>
+
+---
+
+## AMI release v20260415
+
+**Full changelog**: [v20260409 → v20260415](https://github.com/awslabs/amazon-eks-ami/compare/v20260409...v20260415)
+
+### Source AMI names
+
+The table below shows the base Amazon Linux 2023 AMI used to build each EKS AMI variant.
+
+| AMI type | K8s 1.33 – 1.35 | K8s 1.30 – 1.32 |
+|---|---|---|
+| `AL2023_ARM_64_NVIDIA` | `al2023-ami-minimal-2023.11.20260413.0-kernel-6.12-arm64` | `al2023-ami-minimal-2023.11.20260413.0-kernel-6.12-arm64` |
+| `AL2023_ARM_64_STANDARD` | `al2023-ami-minimal-2023.11.20260413.0-kernel-6.12-arm64` | `al2023-ami-minimal-2023.11.20260413.0-kernel-6.1-arm64` |
+| `AL2023_x86_64_NEURON` | `al2023-ami-minimal-2023.11.20260413.0-kernel-6.12-x86_64` | `al2023-ami-minimal-2023.11.20260413.0-kernel-6.1-x86_64` |
+| `AL2023_x86_64_NVIDIA` | `al2023-ami-minimal-2023.11.20260413.0-kernel-6.12-x86_64` | `al2023-ami-minimal-2023.11.20260413.0-kernel-6.1-x86_64` |
+| `AL2023_x86_64_STANDARD` | `al2023-ami-minimal-2023.11.20260413.0-kernel-6.12-x86_64` | `al2023-ami-minimal-2023.11.20260413.0-kernel-6.1-x86_64` |
+
+### Kubernetes 1.35
+
+**Release version**: `1.35.3-20260415` — **Artifacts**: `s3://amazon-eks/1.35.3/2026-04-08/`
+
+| AMI name |
+|---|
+| `amazon-eks-node-al2023-x86_64-nvidia-1.35-v20260415` |
+| `amazon-eks-node-al2023-x86_64-neuron-1.35-v20260415` |
+| `amazon-eks-node-al2023-x86_64-standard-1.35-v20260415` |
+| `amazon-eks-node-al2023-arm64-nvidia-1.35-v20260415` |
+| `amazon-eks-node-al2023-arm64-standard-1.35-v20260415` |
+
+| Package | x86\_64 NVIDIA | x86\_64 NEURON | x86\_64 STANDARD | ARM\_64 NVIDIA | ARM\_64 STANDARD |
+|---|---|---|---|---|---|
+| `amazon-ssm-agent` | 3.3.4108.0-1.amzn2023 | 3.3.4108.0-1.amzn2023 | 3.3.4108.0-1.amzn2023 | 3.3.4108.0-1.amzn2023 | 3.3.4108.0-1.amzn2023 |
+| `aws-neuronx-dkms` | — | 2.27.4.0-dkms | — | — | — |
+| `containerd` | 2.2.1-1.amzn2023.0.2 | 2.2.1-1.amzn2023.0.2 | 2.2.1-1.amzn2023.0.2 | 2.2.1-1.amzn2023.0.2 | 2.2.1-1.amzn2023.0.2 |
+| `efa` | 3.0.0-1.amzn2023 | 3.0.0-1.amzn2023 | — | 3.0.0-1.amzn2023 | — |
+| `ena` | 2.16.1g | 2.16.1g | 2.16.1g | 2.16.1g | 2.16.1g |
+| `kernel6.12` | 6.12.79-101.147.amzn2023 | 6.12.79-101.147.amzn2023 | 6.12.79-101.147.amzn2023 | 6.12.79-101.147.amzn2023 | 6.12.79-101.147.amzn2023 |
+| `kmod-nvidia-latest-dkms` | 580.126.09-1.amzn2023 | — | — | 580.126.09-1.el9 | — |
+| `nvidia-container-toolkit` | 1.19.0-1 | — | — | 1.19.0-1 | — |
+| `runc` | 1.3.4-3.amzn2023.0.2 | 1.3.4-3.amzn2023.0.2 | 1.3.4-3.amzn2023.0.2 | 1.3.4-3.amzn2023.0.2 | 1.3.4-3.amzn2023.0.2 |
+
+---
+
+For all prior releases, see the [full changelog on GitHub](https://github.com/awslabs/amazon-eks-ami/blob/main/CHANGELOG.md).

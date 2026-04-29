@@ -1,0 +1,95 @@
+{
+  "projectType": "infrastructure",
+  "projectName": "Amazon EKS AMI",
+  "projectDescription": "Packer-based build specification and node initialization tooling for creating EKS-optimized Amazon Machine Images on Amazon Linux 2023.",
+  "theme": "aspen",
+  "primaryColor": "#FF9900",
+  "lightColor": "#FFB84D",
+  "darkColor": "#CC7A00",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Building AMIs",
+            "pages": [
+              "building/overview",
+              "building/al2023",
+              "building/accelerated",
+              "building/iam-permissions"
+            ]
+          },
+          {
+            "group": "nodeadm",
+            "pages": [
+              "nodeadm/overview",
+              "nodeadm/configuration",
+              "nodeadm/examples"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "operations/storage",
+              "operations/security",
+              "operations/log-collector"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "nodeadm API",
+            "pages": [
+              "reference/api-concepts",
+              "reference/api"
+            ]
+          },
+          {
+            "group": "Resources",
+            "pages": [
+              "reference/changelog",
+              "reference/contributing"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Packer-based AMI build pipeline for Amazon Linux 2023 (AL2023) with Kubernetes support",
+    "nodeadm: Go-based node initialization daemon for EKS clusters",
+    "Support for accelerated instances with NVIDIA GPU and AWS Neuron drivers",
+    "Elastic Fabric Adapter (EFA) networking support",
+    "FIPS-compliant build variants",
+    "Declarative node configuration via Kubernetes-style YAML (NodeConfig API)",
+    "Ephemeral NVMe storage management with RAID-0/RAID-10/Mount strategies",
+    "ECR credential provider integration and image credential plugin support",
+    "EKS log collector script for diagnostics and support"
+  ],
+  "publicApiSurface": [
+    "nodeadm init --config-source <uri>",
+    "nodeadm config check",
+    "nodeadm config dump",
+    "NodeConfig (node.eks.aws/v1alpha1) — primary YAML configuration object",
+    "ClusterDetails — cluster coordinates (name, apiServerEndpoint, certificateAuthority, cidr)",
+    "KubeletOptions — kubelet config merging and extra flags",
+    "ContainerdOptions — containerd TOML config merging and OCI runtime spec overrides",
+    "InstanceOptions — local storage strategy, environment variables, network nameservers",
+    "featureGates: InstanceIdNodeName, FastImagePull",
+    "make k8s os_distro=al2023 k8s=<version> — primary AMI build target",
+    "make build — build with latest binaries",
+    "make validate — validate packer template",
+    "hack/latest-binaries.sh <k8s-minor-version> <region>"
+  ]
+}

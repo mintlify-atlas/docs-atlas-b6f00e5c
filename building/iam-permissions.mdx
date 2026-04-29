@@ -1,0 +1,143 @@
+---
+title: "IAM policy required for EKS-optimized Packer builds"
+description: "The IAM policy Packer needs to build EKS-optimized AMIs, covering EC2 instance management, ECR image access, and S3 binary downloads by region."
+---
+
+Packer builds run on an EC2 instance that needs permission to create and manage EC2 resources, pull images from ECR, and download Kubernetes binaries from S3. Attach the following policy to the IAM role or user running the build.
+
+## Required IAM policy
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "ec2:AttachVolume",
+                "ec2:AuthorizeSecurityGroupIngress",
+                "ec2:CopyImage",
+                "ec2:CreateImage",
+                "ec2:CreateKeypair",
+                "ec2:CreateSecurityGroup",
+                "ec2:CreateSnapshot",
+                "ec2:CreateTags",
+                "ec2:CreateVolume",
+                "ec2:DeleteKeyPair",
+                "ec2:DeleteSecurityGroup",
+                "ec2:DeleteSnapshot",
+                "ec2:DeleteVolume",
+                "ec2:DeregisterImage",
+                "ec2:DescribeImageAttribute",
+                "ec2:DescribeImages",
+                "ec2:DescribeInstances",
+                "ec2:DescribeInstanceStatus",
+                "ec2:DescribeRegions",
+                "ec2:DescribeSecurityGroups",
+                "ec2:DescribeSnapshots",
+                "ec2:DescribeSubnets",
+                "ec2:DescribeTags",
+                "ec2:DescribeVolumes",
+                "ec2:DetachVolume",
+                "ec2:GetPasswordData",
+                "ec2:ModifyImageAttribute",
+                "ec2:ModifyInstanceAttribute",
+                "ec2:ModifySnapshotAttribute",
+                "ec2:RegisterImage",
+                "ec2:RunInstances",
+                "ec2:StopInstances",
+                "ec2:TerminateInstances",
+                "eks:DescribeAddonVersions",
+                "ecr:GetAuthorizationToken"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "ecr:BatchGetImage",
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer"
+            ],
+            "Resource": "arn:aws:ecr:us-west-2:602401143452:repository/*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "s3:GetObject",
+                "s3:ListBucket"
+            ],
+            "Resource": [
+                "arn:aws:s3:::amazon-eks/*",
+                "arn:aws:s3:::amazon-eks"
+            ]
+        }
+    ]
+}
+```
+
+## Permission groups
+
+### EC2 instance management
+
+The first statement grants broad EC2 permissions needed by Packer to:
+
+- Launch and terminate a temporary builder instance (`ec2:RunInstances`, `ec2:TerminateInstances`, `ec2:StopInstances`)
+- Create and register the AMI and its snapshots (`ec2:CreateImage`, `ec2:RegisterImage`, `ec2:CreateSnapshot`)
+- Manage temporary networking resources such as key pairs and security groups (`ec2:CreateKeypair`, `ec2:CreateSecurityGroup`, etc.)
+- Describe resources to poll for build progress and locate the source AMI (`ec2:Describe*`)
+- Copy the finished AMI to additional regions if `ami_regions` is set (`ec2:CopyImage`)
+
+The `eks:DescribeAddonVersions` action is included here because it is called against the global EKS endpoint and does not target a specific resource ARN.
+
+`ecr:GetAuthorizationToken` is also scoped to `Resource: "*"` because it does not accept resource-level restrictions.
+
+### ECR image access
+
+The second statement allows the builder to pull images from the EKS-managed ECR repositories. This is needed for the pause container image and, on AL2, for caching container images during the build.
+
+The account ID (`602401143452`) and region (`us-west-2`) in the resource ARN must match the region you are building in. The account ID varies by AWS region and partition.
+
+<Warning>
+If you are building in a region other than `us-west-2`, or in a non-standard partition such as AWS GovCloud or AWS China, update the ECR resource ARN to use the correct account ID and region. See the [EKS add-ons images reference](https://docs.aws.amazon.com/eks/latest/userguide/add-ons-images.html) for a complete mapping of regions to account IDs.
+</Warning>
+
+Example for `us-east-1`:
+
+```json
+"Resource": "arn:aws:ecr:us-east-1:602401143452:repository/*"
+```
+
+Example for an AWS GovCloud region (account ID differs):
+
+```json
+"Resource": "arn:aws-us-gov:ecr:us-gov-west-1:013241004608:repository/*"
+```
+
+### S3 binary downloads
+
+The third statement allows the builder to download Kubernetes binaries (`kubelet`, `aws-iam-authenticator`, `ecr-credential-provider`, and others) from the public `amazon-eks` S3 bucket.
+
+<Note>
+If you are supplying your own Kubernetes binaries from a custom S3 bucket, replace `amazon-eks` in both resource ARNs with your bucket name. See [AMI template variables and build options](/building/overview) for how to configure a custom binary bucket.
+</Note>
+
+Example for a custom bucket named `my-eks-binaries`:
+
+```json
+{
+    "Effect": "Allow",
+    "Action": [
+        "s3:GetObject",
+        "s3:ListBucket"
+    ],
+    "Resource": [
+        "arn:aws:s3:::my-eks-binaries/*",
+        "arn:aws:s3:::my-eks-binaries"
+    ]
+}
+```
+
+## Additional Packer permissions
+
+For information about other IAM configurations supported by Packer — such as using an instance profile instead of access keys, or restricting VPC and subnet resources — see the [Packer Amazon builder IAM documentation](https://www.packer.io/plugins/builders/amazon#iam-task-or-instance-role).

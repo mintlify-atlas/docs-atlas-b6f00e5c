@@ -1,0 +1,127 @@
+---
+title: "nodeadm: EKS node initialization and bootstrap tool"
+description: "nodeadm bootstraps an EC2 instance into an EKS cluster by configuring containerd and kubelet from a declarative NodeConfig YAML document."
+---
+
+`nodeadm` is the node initialization tool for Amazon EKS AL2023-based AMIs. It reads a declarative `NodeConfig` document, configures `containerd` and `kubelet`, and starts both daemons so the instance registers as a worker node in your cluster.
+
+<Info>
+  On AL2023-based EKS AMIs, `nodeadm` runs automatically at first boot via a `systemd` service. You do not need to invoke it manually unless you are testing or troubleshooting.
+</Info>
+
+## Minimum required configuration
+
+Before `nodeadm` can initialize a node, it needs four pieces of information about your cluster. You provide these in the `spec.cluster` section of a `NodeConfig` document:
+
+```yaml
+---
+apiVersion: node.eks.aws/v1alpha1
+kind: NodeConfig
+spec:
+  cluster:
+    name: my-cluster
+    apiServerEndpoint: https://example.com
+    certificateAuthority: Y2VydGlmaWNhdGVBdXRob3JpdHk=
+    cidr: 10.100.0.0/16
+```
+
+You can retrieve all four values from the EKS API:
+
+```bash
+aws eks describe-cluster --name my-cluster \
+  --query 'cluster.{endpoint:endpoint,ca:certificateAuthority.data,cidr:kubernetesNetworkConfig.serviceIpv4Cidr}'
+```
+
+## Providing configuration via user data
+
+The most common way to supply a `NodeConfig` is through your EC2 instance's user data. `nodeadm` accepts the document either as plain YAML or embedded in a MIME multi-part message.
+
+**Plain YAML** (simplest approach):
+
+```yaml
+---
+apiVersion: node.eks.aws/v1alpha1
+kind: NodeConfig
+spec:
+  cluster:
+    name: my-cluster
+    apiServerEndpoint: https://example.com
+    certificateAuthority: Y2VydGlmaWNhdGVBdXRob3JpdHk=
+    cidr: 10.100.0.0/16
+```
+
+**MIME multi-part** (required when combining with other user data sections such as cloud-init):
+
+```
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="BOUNDARY"
+
+--BOUNDARY
+Content-Type: application/node.eks.aws
+
+---
+apiVersion: node.eks.aws/v1alpha1
+kind: NodeConfig
+spec:
+  cluster:
+    name: my-cluster
+    apiServerEndpoint: https://example.com
+    certificateAuthority: Y2VydGlmaWNhdGVBdXRob3JpdHk=
+    cidr: 10.100.0.0/16
+
+--BOUNDARY--
+```
+
+When using a MIME multi-part document, each `NodeConfig` part must use the content type `application/node.eks.aws`. `nodeadm` merges all parts it finds in document order — later parts take precedence over earlier ones.
+
+## Commands
+
+### `nodeadm init`
+
+Initializes the instance as an EKS node. This is the command the `systemd` service runs at boot.
+
+```bash
+nodeadm init [flags]
+```
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--config-source` | `imds://user-data` | URI of the `NodeConfig` source. Use `file:///path/to/config.yaml` to load from disk instead of instance metadata. |
+| `--skip` | _(none)_ | Skip a bootstrap phase. Accepts `config` or `run`. |
+| `--daemon` | _(all)_ | Restrict initialization to specific daemons (`containerd`, `kubelet`). Intended for testing only. |
+
+<Warning>
+  The `--daemon` flag is intended for testing and should not be used in production environments.
+</Warning>
+
+### `nodeadm config check`
+
+Validates a `NodeConfig` document without making any changes to the system. Use this to verify your configuration before deploying.
+
+```bash
+nodeadm config check --config-source file:///path/to/config.yaml
+```
+
+`nodeadm` exits with a non-zero status if the configuration is invalid and prints a description of the error.
+
+### `nodeadm config dump`
+
+Resolves, merges, and prints the effective `NodeConfig` that would be applied by `nodeadm init`. Useful for inspecting the merged result when you supply multiple `NodeConfig` parts in a MIME multi-part document.
+
+```bash
+nodeadm config dump [--config-source <uri>] [--config-output <path>]
+```
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--config-source` | `imds://user-data` | URI of the `NodeConfig` source. |
+| `--config-output` | _(stdout)_ | Write the resolved configuration to a file instead of standard output. |
+
+## Configuration source URIs
+
+The `--config-source` flag accepts URIs in the following formats:
+
+| URI scheme | Example | Description |
+| --- | --- | --- |
+| `imds://` | `imds://user-data` | Read from EC2 Instance Metadata Service (default). |
+| `file://` | `file:///etc/nodeadm/config.yaml` | Read from a local file path. |
